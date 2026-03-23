@@ -7,11 +7,11 @@ const db = require('../services/db');
 router.get('/activities', async (req, res) => {
     try {
         const [rows] = await db.execute(`
-            SELECT l.*, u.TenDangNhap 
-            FROM Log l
-            LEFT JOIN User u ON l.User_ID = u.ID
-            WHERE l.LogType != 'WARNING'
-            ORDER BY l.CreatedAt DESC
+            SELECT l.*, u.ten_dang_nhap as TenDangNhap 
+            FROM log_he_thong l
+            LEFT JOIN nguoi_dung u ON l.ma_nguoi_dung_tao = u.ma_nguoi_dung
+            WHERE l.log_type != 'WARNING'
+            ORDER BY l.thoi_gian_khoi_tao DESC
         `);
         res.json(rows);
     } catch (error) {

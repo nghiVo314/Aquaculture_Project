@@ -1,4 +1,3 @@
-// Quản lý tài khoản người dùng.
 const express = require('express');
 const router = express.Router();
 const db = require('../services/db');
@@ -7,18 +6,16 @@ const db = require('../services/db');
 router.get('/', async (req, res) => {
     try {
         const [users] = await db.execute(
-            `SELECT u.ID, u.TenDangNhap, u.TrangThai, r.RoleName, r.ID as Role_ID
-             FROM User u
-             JOIN Role r ON u.Role_ID = r.ID`
+            `SELECT u.ma_nguoi_dung as ID, u.ten_dang_nhap as TenDangNhap, u.trang_thai as TrangThai, r.role_name as RoleName, r.ma_role as Role_ID
+             FROM nguoi_dung u
+             JOIN role r ON u.ma_role = r.ma_role`
         );
 
-        // Fetch area permissions for each user
         for (let user of users) {
             const [areas] = await db.execute(
-                `SELECT kv.ID, kv.LoaiHaiSan 
-                 FROM User_Area ua
-                 JOIN KhuVuc kv ON ua.KhuVuc_ID = kv.ID
-                 WHERE ua.User_ID = ?`,
+                `SELECT ma_khu_vuc as ID, loai_thuy_san as LoaiHaiSan 
+                 FROM khu_vuc 
+                 WHERE ma_nguoi_dung_quan_ly = ?`,
                 [user.ID]
             );
             user.KhuVucQuanLy = areas;
@@ -27,39 +24,6 @@ router.get('/', async (req, res) => {
         res.json(users);
     } catch (error) {
         res.status(500).json({ error: error.message });
-    }
-});
-
-// 2. Add new user with area permissions
-router.post('/', async (req, res) => {
-    const { TenDangNhap, MatKhau, Role_ID, KhuVucQuanLy } = req.body;
-    const connection = await db.getConnection(); // Use connection for transactions
-
-    try {
-        await connection.beginTransaction();
-
-        const [result] = await connection.execute(
-            `INSERT INTO User (TenDangNhap, MatKhau, Role_ID, TrangThai) VALUES (?, ?, ?, 1)`,
-            [TenDangNhap, MatKhau, Role_ID]
-        );
-        const userId = result.insertId;
-
-        if (KhuVucQuanLy && KhuVucQuanLy.length > 0) {
-            for (let kv_id of KhuVucQuanLy) {
-                await connection.execute(
-                    `INSERT INTO User_Area (User_ID, KhuVuc_ID) VALUES (?, ?)`,
-                    [userId, kv_id]
-                );
-            }
-        }
-
-        await connection.commit();
-        res.json({ status: 'success', message: 'Tạo tài khoản thành công!' });
-    } catch (error) {
-        await connection.rollback();
-        res.status(400).json({ status: 'error', message: error.message });
-    } finally {
-        connection.release();
     }
 });
 
@@ -72,13 +36,13 @@ router.put('/:user_id/areas', async (req, res) => {
     try {
         await connection.beginTransaction();
 
-        // Step 1: Delete old permissions
-        await connection.execute(`DELETE FROM User_Area WHERE User_ID = ?`, [userId]);
+        // Remove this user as manager from old zones
+        await connection.execute(`UPDATE khu_vuc SET ma_nguoi_dung_quan_ly = NULL WHERE ma_nguoi_dung_quan_ly = ?`, [userId]);
 
-        // Step 2: Insert new permissions
+        // Assign user as manager to new zones
         for (let kv_id of khuvuc_ids) {
             await connection.execute(
-                `INSERT INTO User_Area (User_ID, KhuVuc_ID) VALUES (?, ?)`,
+                `UPDATE khu_vuc SET ma_nguoi_dung_quan_ly = ? WHERE ma_khu_vuc = ?`,
                 [userId, kv_id]
             );
         }
@@ -97,11 +61,10 @@ router.put('/:user_id/areas', async (req, res) => {
 router.get('/:user_id/my-ponds', async (req, res) => {
     try {
         const [ponds] = await db.execute(
-            `SELECT a.AoNuoi_ID, a.KhuVuc_ID, k.LoaiHaiSan
-             FROM AoNuoi_TramBien a
-             JOIN KhuVuc k ON a.KhuVuc_ID = k.ID
-             JOIN User_Area ua ON k.ID = ua.KhuVuc_ID
-             WHERE ua.User_ID = ?`,
+            `SELECT a.ma_ao_nuoi as AoNuoi_ID, a.ma_khu_vuc as KhuVuc_ID, k.loai_thuy_san as LoaiHaiSan
+             FROM ao_nuoi a
+             JOIN khu_vuc k ON a.ma_khu_vuc = k.ma_khu_vuc
+             WHERE k.ma_nguoi_dung_quan_ly = ?`,
             [req.params.user_id]
         );
         res.json(ponds);

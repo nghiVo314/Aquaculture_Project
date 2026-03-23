@@ -1,11 +1,9 @@
-// Dashboard chung: Thống kê tổng quan về khu nuôi, ao, thiết bị, cảnh báo... Cho phép điều hướng đến các phần chi tiết hơn (zones, ponds, devices, alerts).
 const express = require('express');
 const router = express.Router();
 const db = require('../services/db');
 
 router.get('/summary', async (req, res) => {
     try {
-        // Run all simple count queries concurrently for better performance
         const [
             [khuvucResult],
             [vunuoiResult],
@@ -13,23 +11,22 @@ router.get('/summary', async (req, res) => {
             [logsResult],
             [areaResult]
         ] = await Promise.all([
-            db.execute('SELECT COUNT(*) as total_khuvuc FROM KhuVuc'),
-            db.execute('SELECT COUNT(*) as total_vunuoi FROM VuNuoi'),
-            db.execute('SELECT COUNT(*) as total_aonuoi FROM AoNuoi_TramBien'),
-            db.execute('SELECT COUNT(*) as unhandled_logs FROM Log WHERE Acknowledged = 0'),
-            db.execute('SELECT SUM(DienTich) as total_area FROM AoNuoi_TramBien')
+            db.execute('SELECT COUNT(*) as total_khuvuc FROM khu_vuc'),
+            db.execute('SELECT COUNT(*) as total_vunuoi FROM vu_nuoi'),
+            db.execute('SELECT COUNT(*) as total_aonuoi FROM ao_nuoi'),
+            db.execute('SELECT COUNT(*) as unhandled_logs FROM log_he_thong WHERE acknowledged = 0'),
+            db.execute('SELECT SUM(dien_tich) as total_area FROM ao_nuoi')
         ]);
 
-        // Fetch detailed zone information
         const [zoneDetails] = await db.execute(`
             SELECT 
-                kv.ID as KhuVuc_ID, 
-                kv.LoaiHaiSan,
-                COUNT(DISTINCT antb.AoNuoi_ID) as so_ao,
-                SUM(antb.DienTich) as tong_dien_tich
-            FROM KhuVuc kv
-            LEFT JOIN AoNuoi_TramBien antb ON kv.ID = antb.KhuVuc_ID
-            GROUP BY kv.ID, kv.LoaiHaiSan
+                kv.ma_khu_vuc as KhuVuc_ID, 
+                kv.loai_thuy_san as LoaiHaiSan,
+                COUNT(DISTINCT an.ma_ao_nuoi) as so_ao,
+                SUM(an.dien_tich) as tong_dien_tich
+            FROM khu_vuc kv
+            LEFT JOIN ao_nuoi an ON kv.ma_khu_vuc = an.ma_khu_vuc
+            GROUP BY kv.ma_khu_vuc, kv.loai_thuy_san
         `);
 
         res.json({

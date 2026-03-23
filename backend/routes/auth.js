@@ -1,4 +1,3 @@
-// Đăng nhập, đăng xuất, cấp token.
 const express = require('express');
 const router = express.Router();
 const db = require('../services/db');
@@ -8,9 +7,9 @@ router.post('/login', async (req, res) => {
 
     try {
         const [users] = await db.execute(
-            `SELECT ID, Role_ID, TenDangNhap 
-             FROM User 
-             WHERE TenDangNhap = ? AND MatKhau = ? AND TrangThai = 1`,
+            `SELECT ma_nguoi_dung as ID, ma_role as Role_ID, ten_dang_nhap as TenDangNhap 
+             FROM nguoi_dung 
+             WHERE ten_dang_nhap = ? AND mat_khau = ? AND trang_thai = 1`,
             [TenDangNhap, MatKhau]
         );
 
@@ -18,8 +17,8 @@ router.post('/login', async (req, res) => {
 
         if (user) {
             await db.execute(
-                `INSERT INTO Log (User_ID, LogType, MoTa, CreatedAt, Acknowledged)
-                 VALUES (?, 'LOGIN', 'Người dùng đăng nhập thành công', NOW(), 1)`,
+                `INSERT INTO log_he_thong (ma_nguoi_dung_tao, log_type, mo_ta, acknowledged)
+                 VALUES (?, 'LOGIN', 'Người dùng đăng nhập thành công', 1)`,
                 [user.ID]
             );
 

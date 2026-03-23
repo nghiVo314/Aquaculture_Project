@@ -7,16 +7,16 @@ const db = require('../services/db');
 router.get('/', async (req, res) => {
     const statusFilter = req.query.status;
     let query = `
-        SELECT l.*, u.TenDangNhap 
-        FROM Log l
-        LEFT JOIN User u ON l.User_ID = u.ID
-        WHERE l.LogType = 'WARNING'
+        SELECT l.*, u.ten_dang_nhap as TenDangNhap 
+        FROM log_he_thong l
+        LEFT JOIN nguoi_dung u ON l.ma_nguoi_dung_tao = u.ma_nguoi_dung
+        WHERE l.log_type = 'WARNING'
     `;
     
     if (statusFilter === 'unacknowledged') {
-        query += ' AND l.Acknowledged = 0';
+        query += ' AND l.acknowledged = 0';
     }
-    query += ' ORDER BY l.CreatedAt DESC';
+    query += ' ORDER BY l.thoi_gian_khoi_tao DESC';
 
     try {
         const [rows] = await db.execute(query);
@@ -31,9 +31,9 @@ router.put('/:log_id/ack', async (req, res) => {
     const { User_ID } = req.body;
     try {
         await db.execute(
-            `UPDATE Log 
-             SET Acknowledged = 1, MoTa = CONCAT(MoTa, ' (Đã xử lý bởi User ID: ', ?, ')')
-             WHERE ID = ?`,
+            `UPDATE log_he_thong 
+             SET acknowledged = 1, mo_ta = CONCAT(mo_ta, ' (Đã xử lý bởi User ID: ', ?, ')')
+             WHERE ma_log = ?`,
             [User_ID, req.params.log_id]
         );
         res.json({ status: 'success', message: 'Đã đánh dấu xử lý!' });

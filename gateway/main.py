@@ -1,11 +1,10 @@
-
 import serial.tools.list_ports
 import requests
 import random
 import time
 import datetime
-import  sys
-from  Adafruit_IO import  MQTTClient
+import sys
+from Adafruit_IO import MQTTClient
 
 
 schedules = []
@@ -25,25 +24,26 @@ device_status = {
     "FEEDER": "OFF"   # Máy cho ăn
 }
 
+# Cập nhật ID sang String vì schema2 dùng VARCHAR(50) cho ma_cam_bien
 sensor_id_map = {
-    "TEMP": 1,
-    "DO": 3
+    "TEMP": "CB_TEMP_01",
+    "DO": "CB_DO_01"
 }
 
 # Thêm hàm đồng bộ lịch trình từ server
-def sync_schedules_from_server(tbtaibien_id=2): # ID 2 là máy cho ăn
+def sync_schedules_from_server(tbtaibien_id="DK_FEEDER_01"): # Sử dụng string ID
     global schedules
     try:
-        # Đã sửa lại đường dẫn URL chuẩn:
-        response = requests.get(f"http://127.0.0.1:5000/api/schedules/gateway/{tbtaibien_id}", timeout=3)
+        # Đường dẫn route đã được chuẩn hóa trong routes/devices.js
+        response = requests.get(f"http://127.0.0.1:5000/api/devices/gateway/{tbtaibien_id}", timeout=3)
         if response.status_code == 200:
             schedules = response.json().get("schedules", [])
             print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Đã đồng bộ Lịch trình thành công!")
     except Exception as e:
         print(f"Lỗi đồng bộ lịch trình: {e}")
 
-#config threshold
-def sync_config_from_server(ao_id=1): # Giả sử Gateway này đang quản lý AoNuoi_ID = 1
+# config threshold
+def sync_config_from_server(ao_id="AO_01"): # Sử dụng string ID
     global config
     try:
         # Gọi API lấy cấu hình từ Backend
@@ -96,16 +96,14 @@ def processData(sensor_type, value):
             elif value <= config["TEMP"]["low"]:
                 control_device("FAN", "OFF")
 
-    # Gửi dữ liệu về backend (Giữ nguyên như code cũ của bạn)
     # Gửi dữ liệu về backend
     try:
+        # Schema2: Bỏ tự sinh "id", Database xử lý AUTO_INCREMENT
         res = requests.post("http://127.0.0.1:5000/api/sensors", json={
-            "id": int(time.time() * 1000) % 2147483647,
-            "device_id": sensor_id_map.get(sensor_type, 1), 
+            "device_id": sensor_id_map.get(sensor_type, "CB_UNKNOWN"), 
             "value": value
         })
         
-        # SỬA ĐOẠN PRINT NÀY:
         if res.status_code == 200:
             print(f"  -> Đã gửi {sensor_type} lên Server. Kết quả: 200 (OK)")
         else:
@@ -113,20 +111,25 @@ def processData(sensor_type, value):
             
     except Exception as e:
         print(f"  -> LỖI GỬI API SENSOR: {e}")
+
 def check_feeder_schedule():
     global schedules
-    now = datetime.datetime.now() # Lấy ngày giờ hiện tại đầy đủ
+    # Chỉ lấy phần Time (Giờ:Phút:Giây)
+    now_time = datetime.datetime.now().time() 
     
     should_run = False
     for sched in schedules:
-        # API trả về định dạng ISO (vd: "2024-05-20T08:00:00")
-        start = datetime.datetime.fromisoformat(sched["start_time"])
-        end = datetime.datetime.fromisoformat(sched["end_time"])
-        
-        # Kiểm tra giờ hiện tại có nằm trong khoảng lịch trình không
-        if start <= now <= end:
-            should_run = True
-            break
+        try:
+            # MySQL TIME format is "HH:MM:SS"
+            start = datetime.datetime.strptime(sched["start_time"], "%H:%M:%S").time()
+            end = datetime.datetime.strptime(sched["end_time"], "%H:%M:%S").time()
+            
+            # Kiểm tra giờ hiện tại có nằm trong khoảng lịch trình không
+            if start <= now_time <= end:
+                should_run = True
+                break
+        except ValueError:
+            print(f"  -> Lỗi parsing thời gian lịch trình: {sched}")
             
     if should_run:
         control_device("FEEDER", "ON")
@@ -149,24 +152,9 @@ sync_counter = 0
 while True:
     # Cứ mỗi 3 lần gửi dữ liệu (khoảng 15 giây), Gateway sẽ đồng bộ cấu hình 1 lần
     if sync_counter % 3 == 0:
-        sync_config_from_server(ao_id=1)
-        sync_schedules_from_server(tbtaibien_id=1) #
+        sync_config_from_server(ao_id="AO_01")
+        sync_schedules_from_server(tbtaibien_id="DK_FEEDER_01")
     sync_counter += 1
 
     fakeSerial() # Chạy logic thu thập dữ liệu và điều khiển như cũ
     time.sleep(5)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
