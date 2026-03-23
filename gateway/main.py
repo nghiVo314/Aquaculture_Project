@@ -24,7 +24,6 @@ device_status = {
     "FEEDER": "OFF"   # Máy cho ăn
 }
 
-# Cập nhật ID sang String vì schema2 dùng VARCHAR(50) cho ma_cam_bien
 sensor_id_map = {
     "TEMP": "CB_TEMP_01",
     "DO": "CB_DO_01"
