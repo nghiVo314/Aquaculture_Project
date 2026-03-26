@@ -21,7 +21,7 @@ router.post('/', async (req, res) => {
     const { ma_ao_nuoi, ma_khu_vuc, dien_tich } = req.body; 
     
     try {
-        // Tuỳ chọn: Giữ lại logic kiểm tra giới hạn ao (VD: Tối đa 3 ao / 1 khu vực)
+        //kiểm tra giới hạn ao (VD: Tối đa 3 ao / 1 khu vực)
         const [result] = await db.execute(
             'SELECT COUNT(*) as total FROM ao_nuoi WHERE ma_khu_vuc = ?', 
             [ma_khu_vuc]
