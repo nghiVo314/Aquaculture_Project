@@ -2,12 +2,11 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../services/db');
-
-// GET all regions
-router.get('/', async (req, res) => {
+// Đã thay authorizeRoles bằng requirePermission
+const { requireAuth, requirePermission } = require('../middlewares/rbac');
+// GET all regions - Yêu cầu đăng nhập
+router.get('/', requireAuth, async (req, res) => {
     try {
-        // Alias columns to maintain compatibility with your frontend if needed,
-        // while also pulling the new ma_nguoi_dung_quan_ly field
         const [rows] = await db.execute(`
             SELECT ma_khu_vuc as ID, loai_thuy_san as LoaiHaiSan, ma_nguoi_dung_quan_ly 
             FROM khu_vuc
@@ -18,8 +17,8 @@ router.get('/', async (req, res) => {
     }
 });
 
-// ADD region
-router.post('/', async (req, res) => {
+// ADD region - Yêu cầu quyền 'zone:create'
+router.post('/', requireAuth, requirePermission('zone:create'), async (req, res) => {
     const { ma_khu_vuc, loai_thuy_san, ma_nguoi_dung_quan_ly } = req.body; 
     
     try {
@@ -38,8 +37,8 @@ router.post('/', async (req, res) => {
     }
 });
 
-// DELETE region
-router.delete('/:id', async (req, res) => {
+// DELETE region - Yêu cầu quyền 'zone:delete'
+router.delete('/:id', requireAuth, requirePermission('zone:delete'), async (req, res) => {
     try {
         await db.execute('DELETE FROM khu_vuc WHERE ma_khu_vuc = ?', [req.params.id]);
         res.json({ status: 'deleted' });
@@ -48,8 +47,8 @@ router.delete('/:id', async (req, res) => {
     }
 });
 
-// UPDATE region
-router.put('/:id', async (req, res) => {
+// UPDATE region - Yêu cầu quyền 'zone:update'
+router.put('/:id', requireAuth, requirePermission('zone:update'), async (req, res) => {
     const { loai_thuy_san, ma_nguoi_dung_quan_ly } = req.body;
     try {
         await db.execute(

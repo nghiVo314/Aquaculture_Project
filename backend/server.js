@@ -11,6 +11,7 @@ const alertsRouter = require('./routes/alerts')
 const pondsRouter = require('./routes/ponds')
 const usersRouter = require('./routes/users')
 const zonesRouter = require('./routes/zones')
+const devicesRouter = require('./routes/devices')
 // Add scheduleRouter or devicesRouter if you created them!
 
 const app = express()
@@ -29,7 +30,7 @@ app.use('/api/alerts', alertsRouter)
 app.use('/api/ponds', pondsRouter) // Mapped to your old aonuoi.py logic
 app.use('/api/users', usersRouter)
 app.use('/api/zones', zonesRouter) // Mapped to your old khuvuc.py logic
-
+app.use('/api/devices', devicesRouter)
 // Export app for testing
 module.exports = app
 

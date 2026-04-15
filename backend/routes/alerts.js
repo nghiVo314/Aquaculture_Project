@@ -2,9 +2,11 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../services/db');
+// Đã thay authorizeRoles bằng requirePermission
+const { requireAuth, requirePermission } = require('../middlewares/rbac');
 
-// Get Warnings (Alerts)
-router.get('/', async (req, res) => {
+// Get Warnings (Alerts) - Yêu cầu đăng nhập
+router.get('/', requireAuth, async (req, res) => {
     const statusFilter = req.query.status;
     let query = `
         SELECT l.*, u.ten_dang_nhap as TenDangNhap 
@@ -26,15 +28,16 @@ router.get('/', async (req, res) => {
     }
 });
 
-// Acknowledge a warning
-router.put('/:log_id/ack', async (req, res) => {
-    const { User_ID } = req.body;
+// Acknowledge a warning - Yêu cầu quyền 'alerts:ack'
+router.put('/:log_id/ack', requireAuth, requirePermission('alerts:ack'), async (req, res) => {
+    // Lấy ID/Username trực tiếp từ token để bảo mật, thay vì lấy từ body
+    const username = req.user.username; 
     try {
         await db.execute(
             `UPDATE log_he_thong 
-             SET acknowledged = 1, mo_ta = CONCAT(mo_ta, ' (Đã xử lý bởi User ID: ', ?, ')')
+             SET acknowledged = 1, mo_ta = CONCAT(mo_ta, ' (Đã xử lý bởi User: ', ?, ')')
              WHERE ma_log = ?`,
-            [User_ID, req.params.log_id]
+            [username, req.params.log_id]
         );
         res.json({ status: 'success', message: 'Đã đánh dấu xử lý!' });
     } catch (error) {

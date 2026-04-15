@@ -51,4 +51,22 @@ router.get('/check-offline', async (req, res) => {
     }
 });
 
+// Thêm vào backend/routes/sensors.js
+router.get('/:device_id/history', async (req, res) => {
+    try {
+        const [rows] = await db.execute(
+            `SELECT thoi_gian, gia_tri 
+             FROM du_lieu_quan_trac 
+             WHERE ma_cam_bien = ? 
+             ORDER BY thoi_gian DESC 
+             LIMIT 20`,
+            [req.params.device_id]
+        );
+        // Đảo ngược mảng để hiển thị từ cũ đến mới trên biểu đồ
+        res.json(rows.reverse());
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 module.exports = router;

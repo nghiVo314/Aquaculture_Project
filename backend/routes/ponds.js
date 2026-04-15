@@ -1,11 +1,11 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../services/db');
-
+const { requireAuth, requirePermission } = require('../middlewares/rbac');
 //flag khi có thây đổi
 let needsReload = false;
 
-router.get('/', async (req, res) => {
+router.get('/', requireAuth, async (req, res) => {
     try {
         const [rows] = await db.execute(`
             SELECT a.*, t.ma_tram, t.trang_thai_cloud 
@@ -18,8 +18,8 @@ router.get('/', async (req, res) => {
     }
 });
 
-// ADD pond (Thêm ao nuôi mới vào một khu vực)
-router.post('/', async (req, res) => {
+// THÊM AO - Chỉ dành cho user có quyền 'pond:create'
+router.post('/', requireAuth, requirePermission('pond:create'), async (req, res) => {
     const { ma_ao_nuoi, ma_khu_vuc, dien_tich } = req.body; 
     const connection = await db.getConnection(); // Sử dụng connection riêng để dùng Transaction
     
@@ -104,9 +104,16 @@ router.post('/', async (req, res) => {
 // GET config for Gateway (Lấy ngưỡng hiện tại của ao để gửi cho main.py)
 router.get('/:ao_id/config', async (req, res) => {
     try {
-        // Truy xuất từ rule_dieu_khien dựa trên mã ao nuôi
         const [configs] = await db.execute(
-            `SELECT cb.loai_cam_bien AS LoaiCamBien, r.min_value, r.max_value, r.ma_rule
+            `SELECT 
+                cb.loai_cam_bien AS LoaiCamBien, 
+                r.min_value, 
+                r.max_value, 
+                r.ma_rule, 
+                cb.ma_thiet_bi AS ma_cam_bien,
+                (SELECT gia_tri FROM du_lieu_quan_trac 
+                 WHERE ma_cam_bien = cb.ma_thiet_bi 
+                 ORDER BY thoi_gian DESC LIMIT 1) AS latest_value
              FROM rule_dieu_khien r
              JOIN cam_bien cb ON r.ma_cam_bien = cb.ma_thiet_bi
              JOIN thiet_bi_tai_bien tbtb ON cb.ma_thiet_bi = tbtb.ma_thiet_bi
@@ -120,8 +127,8 @@ router.get('/:ao_id/config', async (req, res) => {
     }
 });
 
-// PUT config from Dashboard (Cập nhật ngưỡng từ giao diện web)
-router.put('/:ao_id/config', async (req, res) => {
+// SỬA CẤU HÌNH AO - Chỉ dành cho user có quyền 'pond:update:config'
+router.put('/:ao_id/config', requireAuth, requirePermission('pond:update:config'), async (req, res) => {
     const { LoaiCamBien, min_value, max_value } = req.body;
     try {
         // Cập nhật bảng rule_dieu_khien dựa trên mã ao và loại cảm biến
@@ -144,8 +151,8 @@ router.put('/:ao_id/config', async (req, res) => {
     }
 });
 
-// UPDATE thông tin ao (VD: Sửa diện tích)
-router.put('/:id', async (req, res) => {
+// CẬP NHẬT THÔNG TIN AO - Chỉ dành cho user có quyền 'pond:update'
+router.put('/:id', requireAuth, requirePermission('pond:update'), async (req, res) => {
     const { dien_tich } = req.body;
     try {
         await db.execute(
@@ -158,8 +165,8 @@ router.put('/:id', async (req, res) => {
     }
 });
 
-// DELETE ao nuôi
-router.delete('/:id', async (req, res) => {
+// XÓA AO - Chỉ dành cho user có quyền 'pond:delete'
+router.delete('/:id', requireAuth, requirePermission('pond:delete'), async (req, res) => {
     try {
         await db.execute('DELETE FROM ao_nuoi WHERE ma_ao_nuoi = ?', [req.params.id]);
         needsReload = true; //bật cờ sau khi xóa ao
