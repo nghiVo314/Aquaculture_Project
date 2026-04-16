@@ -104,6 +104,14 @@ router.post('/', requireAuth, requirePermission('pond:create'), async (req, res)
 // GET config for Gateway (Lấy ngưỡng hiện tại của ao để gửi cho main.py)
 router.get('/:ao_id/config', async (req, res) => {
     try {
+
+        const [[pond]] = await db.execute(
+            `SELECT che_do
+             FROM ao_nuoi
+             WHERE ma_ao_nuoi = ?`,
+            [req.params.ao_id]
+        );
+
         const [configs] = await db.execute(
             `SELECT 
                 cb.loai_cam_bien AS LoaiCamBien, 
@@ -111,9 +119,11 @@ router.get('/:ao_id/config', async (req, res) => {
                 r.max_value, 
                 r.ma_rule, 
                 cb.ma_thiet_bi AS ma_cam_bien,
-                (SELECT gia_tri FROM du_lieu_quan_trac 
-                 WHERE ma_cam_bien = cb.ma_thiet_bi 
-                 ORDER BY thoi_gian DESC LIMIT 1) AS latest_value
+                (SELECT gia_tri
+                 FROM du_lieu_quan_trac
+                 WHERE ma_cam_bien = cb.ma_thiet_bi
+                 ORDER BY thoi_gian DESC
+                 LIMIT 1) AS latest_value
              FROM rule_dieu_khien r
              JOIN cam_bien cb ON r.ma_cam_bien = cb.ma_thiet_bi
              JOIN thiet_bi_tai_bien tbtb ON cb.ma_thiet_bi = tbtb.ma_thiet_bi
@@ -121,7 +131,13 @@ router.get('/:ao_id/config', async (req, res) => {
              WHERE tb.ma_ao_nuoi = ?`,
             [req.params.ao_id]
         );
-        res.json({ ao_id: req.params.ao_id, configs });
+
+        res.json({
+            ao_id: req.params.ao_id,
+            che_do: pond?.che_do || 'AUTO',
+            configs
+        });
+
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -243,6 +259,20 @@ router.get('/check-reload', (req, res) => {
     res.json({ reload: needsReload });
     // Sau khi trả về true, reset lại cờ về false để không reload lặp lại
     if (needsReload) needsReload = false; 
+});
+
+// Cập nhật chế độ điều khiển của ao (AUTO / MANUAL)
+router.put('/:id/mode', requireAuth, requirePermission('pond:update:config'), async (req, res) => {
+    const { che_do } = req.body; // 'AUTO' hoặc 'MANUAL'
+    try {
+        await db.execute(
+            'UPDATE ao_nuoi SET che_do = ? WHERE ma_ao_nuoi = ?',
+            [che_do, req.params.id]
+        );
+        res.json({ status: 'success', message: `Đã chuyển ao sang chế độ ${che_do}` });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
 });
 
 module.exports = router;;

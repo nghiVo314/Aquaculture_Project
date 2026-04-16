@@ -4,8 +4,12 @@ import random
 import time
 import datetime
 import sys
-# from Adafruit_IO import MQTTClient
+#from Adafruit_IO import MQTTClient
 
+
+# ==========================================
+# HÀM ĐỂ INITIALIZE LỨC BẮT ĐẦU CHẠY
+# ==========================================
 # Biến toàn cục lưu trữ dữ liệu và cấu hình cho từng ao
 ponds_data = {}
 #láy config của các ao từ database
@@ -42,7 +46,8 @@ def init_ponds_data_from_server():
                         "FEEDER": "OFF"
                     },
                     "sensor_ids": pond["sensor_ids"], # Lấy dict sensor ids từ server
-                    "schedules": []
+                    "schedules": [],
+                    "is_feeding_logged": False # <--- THÊM DÒNG NÀY ĐỂ TRACKING
                 }
             print("✅ Đã khởi tạo cấu trúc ao thành công từ Database!")
             
@@ -71,14 +76,34 @@ def sync_schedules_from_server(pond_key):
     except Exception as e:
         print(f"Lỗi đồng bộ lịch trình ao {pond_key}: {e}")
 
+def get_active_schedule(pond_key):
+    now_time = datetime.datetime.now().time()
+
+    for sched in ponds_data[pond_key].get("schedules", []):
+        try:
+            start = datetime.datetime.strptime(sched["start_time"], "%H:%M:%S").time()
+            end = datetime.datetime.strptime(sched["end_time"], "%H:%M:%S").time()
+
+            if start <= now_time <= end:
+                return sched
+        except Exception:
+            continue
+
+    return None
 
 def sync_config_from_server(pond_key):
     try:
         ao_id = ponds_data[pond_key]["ao_id"]
         response = requests.get(f"http://127.0.0.1:5000/api/ponds/{ao_id}/config", timeout=3)
         if response.status_code == 200:
-            server_configs = response.json().get("configs", [])
             
+            data = response.json()
+            # 1. Update the Pond Mode from the database payload
+            # (Assuming your backend API sends { che_do: 'AUTO', configs: [...] })
+            db_mode = data.get("che_do", "AUTO") 
+            ponds_data[pond_key]["config"]["MODE"] = db_mode
+
+            server_configs = response.json().get("configs", [])            
             # Cập nhật lại biến config của từng ao
             for item in server_configs:
                 loai = item["LoaiCamBien"]
@@ -93,30 +118,84 @@ def sync_config_from_server(pond_key):
     except Exception as e:
         print(f"Lỗi đồng bộ cấu hình ao {pond_key}: {e}")
 
+
+#hàm đồng bộ trạng thái thiết bị từ server, để đảm bảo khi có lệnh thủ công từ app thì gateway cũng nhận được và cập nhật lại trạng thái thiết bị cho đúng
+def sync_device_status_from_server(pond_key):
+    try:
+        ao_id = ponds_data[pond_key]["ao_id"]
+        response = requests.get(f"http://127.0.0.1:5000/api/devices/gateway/status/{ao_id}", timeout=3)
+        if response.status_code == 200:
+            server_devices = response.json().get("devices", [])
+            
+            for dev in server_devices:
+                # Map DB status (HOAT_DONG/TAT) to Gateway action (ON/OFF)
+                action = "ON" if dev["trang_thai"] == "HOAT_DONG" else "OFF"
+                device_name = dev["loai_thiet_bi"] # e.g., AERATOR, PUMP
+                
+                # If server status is different from current status, execute command
+                if ponds_data[pond_key]["device_status"].get(device_name) != action:
+                    print(f"🔄 Đã nhận lệnh thủ công từ Server: {device_name} -> {action}")
+                    control_device(pond_key, device_name, action)
+                    
+    except Exception as e:
+        print(f"Lỗi đồng bộ trạng thái thiết bị ao {pond_key}: {e}")
+
 # Hàm điều khiển thiết bị, gửi lệnh xuống mạch khi vượt ngưỡng
 def control_device(pond_key, device_name, action):
     global isMicrobitConnected
-    
-    # Kiểm tra trạng thái hiện tại, nếu khác thì mới gửi lệnh
+
     if ponds_data[pond_key]["device_status"][device_name] != action:
         ponds_data[pond_key]["device_status"][device_name] = action
+
         print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] LỆNH ĐIỀU KHIỂN AO {pond_key}: {device_name} -> {action}")
-        
-        # --- THÊM MỚI: GỬI TRẠNG THÁI LÊN SERVER ---
+
+        #parse device_id theo format đã thống nhất: DK_<DEVICE_NAME>_<POND_NUMBER>
+        device_name_clean = device_name.strip().upper()
+        pond_number = pond_key.split("_")[-1].strip()
+
+        device_id = f"DK_{device_name_clean}_{pond_number}"
+
+        db_status = "HOAT_DONG" if action == "ON" else "TAT"
+
+        #UPDATE DEVICE STATUS chắc cần auth nhưng thôi kệ không ảnh hưởng gì => bỏ auth bên backend?
         try:
-            # Chuyển đổi trạng thái ON/OFF thành ENUM của database
-            db_status = "HOAT_DONG" if action == "ON" else "TAT"
-            
-            # Giả định ma_thiet_bi trong DB có cấu trúc: TB_PUMP_01, TB_FAN_01...
-            # Bạn có thể thêm cấu hình "device_ids" vào ponds_data tương tự "sensor_ids" nếu mã thiết bị phức tạp
-            device_id = f"TB_{device_name}_{pond_key.zfill(2)}" 
-            
-            # Gửi request cập nhật DB
-            requests.put(f"http://127.0.0.1:5000/api/devices/{device_id}/status", json={
-                "trang_thai": db_status
-            }, timeout=3)
+            res = requests.put(
+                f"http://127.0.0.1:5000/api/devices/{device_id}/status",
+                json={"trang_thai": db_status},
+                timeout=3
+            )
+            #print("PUT status:", res.status_code)
         except Exception as e:
-            print(f"❌ Lỗi gửi trạng thái thiết bị lên server: {e}")
+            print("❌ Lỗi update status:", e)
+
+        #FEEDING LOGIC để ghi vào lịch sử cho ăn
+        if device_name_clean == "FEEDER":
+            if action == "ON" and not ponds_data[pond_key]["is_feeding_logged"]:
+                ponds_data[pond_key]["is_feeding_logged"] = True
+
+                active_schedule = get_active_schedule(pond_key)
+                ma_cong_thuc = active_schedule.get("ma_cong_thuc") if active_schedule else None
+
+                try:
+                    res = requests.post(
+                        "http://127.0.0.1:5000/api/devices/feeding-history",
+                        json={
+                            "ma_cong_thuc": ma_cong_thuc,
+                            "ma_tb_dieu_khien": device_id,
+                            "muc_do_them_an": None,
+                            "bang_chung_hinh_anh": None
+                        },
+                        timeout=3
+                    )
+
+                    print("POST status:", res.status_code)
+                    print("POST response:", res.text)
+
+                except Exception as e:
+                    print("❌ Lỗi gọi API:", e)
+
+            elif action == "OFF":
+                ponds_data[pond_key]["is_feeding_logged"] = False
         # -------------------------------------------
 
         if isMicrobitConnected:
@@ -319,8 +398,10 @@ while True:
     # 1. Định kỳ đồng bộ cấu hình cho tất cả các ao
     if sync_counter % 3 == 0: # Mỗi 3 vòng (tương đương khoảng 9-10 giây) sẽ đồng bộ một lần
         for pond_key in list(ponds_data.keys()):
+            #cập nhật thay đổi cấu hình và lịch trình từ server, đồng thời cập nhật trạng thái thiết bị để đồng bộ với lệnh thủ công từ app
             sync_config_from_server(pond_key)
             sync_schedules_from_server(pond_key)
+            sync_device_status_from_server(pond_key)
     sync_counter += 1
 
     # 2. Đọc dữ liệu thực tế từ mạch và tạo dữ liệu giả

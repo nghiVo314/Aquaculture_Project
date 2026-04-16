@@ -129,9 +129,16 @@ router.delete('/inventory/:id', requireAuth, requirePermission('device:delete'),
 router.get('/', requireAuth, async (req, res) => {
     try {
         const [schedules] = await db.execute(
-            `SELECT lt.thoi_gian_bat_dau as start_time, lt.thoi_gian_ket_thuc as end_time, lt.ma_tb_dieu_khien as ThietBiTaiBien_ID, tbdk.loai_thiet_bi as LoaiThietBi 
+            `SELECT 
+                lt.ma_lich_trinh,
+                lt.thoi_gian_bat_dau AS start_time,
+                lt.thoi_gian_ket_thuc AS end_time,
+                lt.ma_tb_dieu_khien AS ThietBiTaiBien_ID,
+                lt.ma_cong_thuc,
+                tbdk.loai_thiet_bi AS LoaiThietBi
              FROM lich_trinh lt
-             JOIN thiet_bi_dieu_khien tbdk ON lt.ma_tb_dieu_khien = tbdk.ma_thiet_bi
+             JOIN thiet_bi_dieu_khien tbdk 
+                ON lt.ma_tb_dieu_khien = tbdk.ma_thiet_bi
              ORDER BY lt.thoi_gian_bat_dau DESC`
         );
         res.json(schedules);
@@ -144,19 +151,28 @@ router.get('/', requireAuth, async (req, res) => {
 router.get('/gateway/:thietbi_id', async (req, res) => {
     try {
         const [schedules] = await db.execute(
-            `SELECT thoi_gian_bat_dau as start_time, thoi_gian_ket_thuc as end_time 
-             FROM lich_trinh 
-             WHERE ma_tb_dieu_khien = ? AND thoi_gian_ket_thuc >= CURTIME()`,
+            `SELECT 
+                lt.ma_lich_trinh,
+                lt.thoi_gian_bat_dau AS start_time,
+                lt.thoi_gian_ket_thuc AS end_time,
+                lt.ma_tb_dieu_khien,
+                lt.ma_cong_thuc
+             FROM lich_trinh lt
+             WHERE lt.ma_tb_dieu_khien = ?
+               AND lt.thoi_gian_ket_thuc >= CURTIME()
+             ORDER BY lt.thoi_gian_bat_dau ASC`,
             [req.params.thietbi_id]
         );
+
         res.json({ thietbi_id: req.params.thietbi_id, schedules });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
 });
 
-// Cập nhật trạng thái thiết bị - Yêu cầu quyền 'device:status:update'
-router.put('/:id/status', requireAuth, requirePermission('device:status:update'), async (req, res) => {
+// Cập nhật trạng thái thiết bị - Yêu cầu quyền 'device:status:update'...........tạm thời bỏ auth để gateway gọi dễ hơn
+// router.put('/:id/status', requireAuth, requirePermission('device:status:update'), async (req, res) => {
+router.put('/:id/status', async (req, res) => {
     const { trang_thai } = req.body;
     try {
         await db.execute(
@@ -169,13 +185,34 @@ router.put('/:id/status', requireAuth, requirePermission('device:status:update')
     }
 });
 
+
+//lấy status của các thiết bị cho gateway
+router.get('/gateway/status/:pond_id', async (req, res) => {
+    try {
+        const [devices] = await db.execute(
+            `SELECT tbdk.loai_thiet_bi, tbtb.trang_thai 
+             FROM thiet_bi_tai_bien tbtb
+             JOIN thiet_bi_dieu_khien tbdk ON tbtb.ma_thiet_bi = tbdk.ma_thiet_bi
+             JOIN tram_bien tb ON tbtb.ma_tram = tb.ma_tram
+             WHERE tb.ma_ao_nuoi = ?`,
+            [req.params.pond_id]
+        );
+        res.json({ pond_id: req.params.pond_id, devices });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // Thêm vào backend/routes/devices.js
 router.post('/schedules', requireAuth, requirePermission('device:status:update'), async (req, res) => {
-    const { ma_tb_dieu_khien, start_time, end_time } = req.body;
+    const { ma_tb_dieu_khien, start_time, end_time, ma_cong_thuc } = req.body;
+
     try {
         await db.execute(
-            'INSERT INTO lich_trinh (ma_tb_dieu_khien, thoi_gian_bat_dau, thoi_gian_ket_thuc) VALUES (?, ?, ?)',
-            [ma_tb_dieu_khien, start_time, end_time]
+            `INSERT INTO lich_trinh 
+                (ma_tb_dieu_khien, thoi_gian_bat_dau, thoi_gian_ket_thuc, ma_cong_thuc)
+             VALUES (?, ?, ?, ?)`,
+            [ma_tb_dieu_khien, start_time, end_time, ma_cong_thuc || null]
         );
         res.json({ status: 'success', message: 'Thêm lịch trình thành công' });
     } catch (error) {
@@ -183,6 +220,8 @@ router.post('/schedules', requireAuth, requirePermission('device:status:update')
     }
 });
 
+
+// Xóa lịch trình - Yêu cầu quyền 'device:status:update'
 router.delete('/schedules/:id', requireAuth, requirePermission('device:status:update'), async (req, res) => {
     try {
         await db.execute('DELETE FROM lich_trinh WHERE ma_lich_trinh = ?', [req.params.id]);
@@ -191,4 +230,87 @@ router.delete('/schedules/:id', requireAuth, requirePermission('device:status:up
         res.status(500).json({ error: error.message });
     }
 });
+
+
+// Lấy công thức cho ăn để hiển thị trong form tạo lịch trình
+router.get('/feeding-formulas', requireAuth, async (req, res) => {
+    try {
+        const [rows] = await db.execute(
+            `SELECT ma_cong_thuc, ti_le_cho_an, thong_tin_bo_sung
+             FROM cong_thuc_cho_an
+             ORDER BY ma_cong_thuc ASC`
+        );
+        res.json(rows);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+
+// Thêm công thức cho ăn mới - Yêu cầu quyền 'device:status:update'
+router.post('/feeding-formulas', requireAuth, requirePermission('device:status:update'), async (req, res) => {
+    const { ma_cong_thuc, ti_le_cho_an, thong_tin_bo_sung } = req.body;
+    try {
+        await db.execute(
+            `INSERT INTO cong_thuc_cho_an (ma_cong_thuc, ti_le_cho_an, thong_tin_bo_sung)
+             VALUES (?, ?, ?)`,
+            [ma_cong_thuc, ti_le_cho_an || null, thong_tin_bo_sung || null]
+        );
+        res.json({ status: 'success', message: 'Đã thêm công thức' });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// API Lấy danh sách lịch sử cho ăn (dành cho React)
+router.get('/feeding-history', requireAuth, async (req, res) => {
+    try {
+        const [rows] = await db.execute(
+            `SELECT * FROM ghi_chep_cho_an ORDER BY thoi_gian_cho_an DESC LIMIT 50`
+        );
+        res.json(rows);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// API Ghi nhận lịch sử cho ăn (dành cho Gateway Python gọi, không cần requireAuth để Gateway gọi dễ dàng)
+router.post('/feeding-history', async (req, res) => {
+    let { ma_cong_thuc, ma_tb_dieu_khien, muc_do_them_an, bang_chung_hinh_anh } = req.body;
+
+    try {
+        // Nếu gateway chưa gửi ma_cong_thuc thì backend tự suy ra từ lịch trình đang active
+        if (!ma_cong_thuc && ma_tb_dieu_khien) {
+            const [activeRows] = await db.execute(
+                `SELECT lt.ma_cong_thuc
+                 FROM lich_trinh lt
+                 WHERE lt.ma_tb_dieu_khien = ?
+                   AND CURTIME() BETWEEN lt.thoi_gian_bat_dau AND lt.thoi_gian_ket_thuc
+                 ORDER BY lt.thoi_gian_bat_dau DESC
+                 LIMIT 1`,
+                [ma_tb_dieu_khien]
+            );
+            ma_cong_thuc = activeRows[0]?.ma_cong_thuc || null;
+        }
+
+        await db.execute(
+            `INSERT INTO ghi_chep_cho_an 
+                (ma_cong_thuc, ma_tb_dieu_khien, thoi_gian_cho_an, muc_do_them_an, bang_chung_hinh_anh) 
+             VALUES (?, ?, NOW(), ?, ?)`,
+            [
+                ma_cong_thuc,
+                ma_tb_dieu_khien,
+                muc_do_them_an || null,
+                bang_chung_hinh_anh || null
+            ]
+        );
+
+        res.json({ status: 'success', message: 'Đã lưu lịch sử cho ăn' });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+
+
 module.exports = router;

@@ -134,10 +134,7 @@ export const updateUserAreas = async (userId, khuvuc_ids) => {
 };
 
 // Lịch trình
-export const getSchedules = async () => {
-    const res = await fetch('http://127.0.0.1:5000/api/devices'); // Route mặc định lấy lịch trình
-    return res.json();
-};
+export const getSchedules = () => request('/devices');
 
 // Báo cáo & Lịch sử cảm biến
 export const getSensorHistory = async (deviceId, days = 7) => {
@@ -154,7 +151,7 @@ export const addSchedule = async (payload) => {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${token}` 
         },
-        body: JSON.stringify(payload) // { ma_tb_dieu_khien, start_time, end_time }
+        body: JSON.stringify(payload) // { ma_tb_dieu_khien, start_time, end_time, ma_cong_thuc }
     });
     if (!res.ok) throw new Error('Lỗi thêm lịch trình');
     return res.json();
@@ -172,3 +169,30 @@ export const deleteSchedule = async (id) => {
     if (!res.ok) throw new Error('Lỗi xóa lịch trình');
     return res.json();
 };
+
+//gọi lịch sử cho ăn
+export const getFeedingHistory = async () => {
+    const token = localStorage.getItem('aq_token');
+    const res = await fetch('http://127.0.0.1:5000/api/devices/feeding-history', {
+        headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (!res.ok) throw new Error('Lỗi tải lịch sử cho ăn');
+    return res.json();
+};
+
+// Cập nhật chế độ hoạt động của ao (AUTO/MANUAL)
+export const updatePondMode = async (pondId, mode) => {
+    return request(`/ponds/${pondId}/mode`, {
+        method: 'PUT',
+        body: JSON.stringify({ che_do: mode })
+    });
+};
+
+export const getFeedingFormulas = () => request('/devices/feeding-formulas');
+
+export const addFeedingFormula = (payload) =>
+    request('/devices/feeding-formulas', {
+        method: 'POST',
+        body: JSON.stringify(payload)
+    });
+    
