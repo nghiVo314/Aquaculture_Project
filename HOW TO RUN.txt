@@ -1,0 +1,4 @@
+run in 3 separate terminal:
+1. cd backend sau đó chạy npx nodemon server.js
+2. py gateway/main.py
+3. cd frontend sau đó chạy npm run dev
