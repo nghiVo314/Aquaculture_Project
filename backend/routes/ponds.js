@@ -51,9 +51,10 @@ router.post('/', requireAuth, requirePermission('pond:create'), async (req, res)
 
         // 4. Khởi tạo danh sách Cảm biến (DO, PH, TEMP)
         const sensors = [
-            { id: `CB_DO_${ma_ao_nuoi}`, type: 'DO' },
-            { id: `CB_PH_${ma_ao_nuoi}`, type: 'PH' },
+            // { id: `CB_DO_${ma_ao_nuoi}`, type: 'DO' },
+            // { id: `CB_PH_${ma_ao_nuoi}`, type: 'PH' },
             { id: `CB_TEMP_${ma_ao_nuoi}`, type: 'TEMP' }
+            //{ id: `CB_LIGHT_${ma_ao_nuoi}`, type: 'LIGHT' }
         ];
 
         for (let s of sensors) {
@@ -63,10 +64,10 @@ router.post('/', requireAuth, requirePermission('pond:create'), async (req, res)
 
         // 5. Khởi tạo danh sách Thiết bị điều khiển (AERATOR, PUMP, FAN, FEEDER)
         const actuators = [
-            { id: `DK_AERATOR_${ma_ao_nuoi}`, type: 'AERATOR' },
+            //{ id: `DK_AERATOR_${ma_ao_nuoi}`, type: 'AERATOR' },
             { id: `DK_PUMP_${ma_ao_nuoi}`, type: 'PUMP' },
             { id: `DK_FAN_${ma_ao_nuoi}`, type: 'FAN' },
-            //{ id: `DK_FEEDER_${ma_ao_nuoi}`, type: 'FEEDER' } 
+            { id: `DK_FEEDER_${ma_ao_nuoi}`, type: 'FEEDER' } 
         ];
 
         for (let a of actuators) {
@@ -77,8 +78,8 @@ router.post('/', requireAuth, requirePermission('pond:create'), async (req, res)
         // 6. Khởi tạo Rule mặc định nối Cảm biến với Thiết bị điều khiển
         // Giả định: DO -> AERATOR, PH -> PUMP, TEMP -> FAN
         const rules = [
-            { id: `RULE_DO_${ma_ao_nuoi}`, cb: `CB_DO_${ma_ao_nuoi}`, dk: `DK_AERATOR_${ma_ao_nuoi}`, min: 5.0, max: 7.0 },
-            { id: `RULE_PH_${ma_ao_nuoi}`, cb: `CB_PH_${ma_ao_nuoi}`, dk: `DK_PUMP_${ma_ao_nuoi}`, min: 5.0, max: 8.0 },
+            // { id: `RULE_DO_${ma_ao_nuoi}`, cb: `CB_DO_${ma_ao_nuoi}`, dk: `DK_AERATOR_${ma_ao_nuoi}`, min: 5.0, max: 7.0 },
+            // { id: `RULE_PH_${ma_ao_nuoi}`, cb: `CB_PH_${ma_ao_nuoi}`, dk: `DK_PUMP_${ma_ao_nuoi}`, min: 5.0, max: 8.0 },
             { id: `RULE_TEMP_${ma_ao_nuoi}`, cb: `CB_TEMP_${ma_ao_nuoi}`, dk: `DK_FAN_${ma_ao_nuoi}`, min: 25.0, max: 28.0 }
         ];
 
@@ -96,6 +97,7 @@ router.post('/', requireAuth, requirePermission('pond:create'), async (req, res)
     } catch (error) {
         await connection.rollback();
         res.status(500).json({ error: error.message });
+        println("Lỗi khi thêm ao mới:", error);
     } finally {
         connection.release();
     }

@@ -4,7 +4,11 @@ import random
 import time
 import datetime
 import sys
-#from Adafruit_IO import MQTTClient
+from adafruit_service import (
+    init_adafruit,
+    publish_sensor_pond1,
+    publish_device_pond1
+)
 
 
 # ==========================================
@@ -34,8 +38,8 @@ def init_ponds_data_from_server():
                     "ao_id": pond["ao_id"],
                     "feeder_id": pond["feeder_id"],
                     "config": {
-                        "DO": {"min": 5.0, "max": 7.0},  # Sẽ được cập nhật lại bằng sync_config_from_server
-                        "PH": {"min": 5.0, "max": 8.0},
+                        # "DO": {"min": 5.0, "max": 7.0},  # Sẽ được cập nhật lại bằng sync_config_from_server
+                        # "PH": {"min": 5.0, "max": 8.0},
                         "TEMP": {"high": 28, "low": 25},
                         "MODE": "AUTO"
                     },
@@ -110,9 +114,9 @@ def sync_config_from_server(pond_key):
                 if loai == "TEMP":
                     ponds_data[pond_key]["config"]["TEMP"]["low"] = item["min_value"]
                     ponds_data[pond_key]["config"]["TEMP"]["high"] = item["max_value"]
-                elif loai in ["DO", "PH"]:
-                    ponds_data[pond_key]["config"][loai]["min"] = item["min_value"]
-                    ponds_data[pond_key]["config"][loai]["max"] = item["max_value"]
+                # elif loai in ["DO", "PH"]:
+                #     ponds_data[pond_key]["config"][loai]["min"] = item["min_value"]
+                #     ponds_data[pond_key]["config"][loai]["max"] = item["max_value"]
             
             print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Đã đồng bộ cấu hình ao {pond_key} từ Server!")
     except Exception as e:
@@ -136,7 +140,11 @@ def sync_device_status_from_server(pond_key):
                 if ponds_data[pond_key]["device_status"].get(device_name) != action:
                     print(f"🔄 Đã nhận lệnh thủ công từ Server: {device_name} -> {action}")
                     control_device(pond_key, device_name, action)
-                    
+
+                #adafruit
+                if str(pond_key) == "TRAM_01":
+                    publish_device_pond1(device_name, action)
+
     except Exception as e:
         print(f"Lỗi đồng bộ trạng thái thiết bị ao {pond_key}: {e}")
 
@@ -149,9 +157,8 @@ def control_device(pond_key, device_name, action):
 
         print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] LỆNH ĐIỀU KHIỂN AO {pond_key}: {device_name} -> {action}")
 
-        #parse device_id theo format đã thống nhất: DK_<DEVICE_NAME>_<POND_NUMBER>
         device_name_clean = device_name.strip().upper()
-        pond_number = pond_key.split("_")[-1].strip()
+        pond_number = "_".join(pond_key.split("_")[1:])
 
         device_id = f"DK_{device_name_clean}_{pond_number}"
 
@@ -198,6 +205,9 @@ def control_device(pond_key, device_name, action):
                 ponds_data[pond_key]["is_feeding_logged"] = False
         # -------------------------------------------
 
+        if str(pond_key) == "1":
+            publish_device_pond1(device_name, action)
+
         if isMicrobitConnected:
             try:
                 # Gửi lệnh kèm ID ao. VD: "!1:FAN:ON#" hoặc "!2:PUMP:OFF#"
@@ -211,6 +221,10 @@ def processData(pond_key, sensor_type, value):
     if pond_key not in ponds_data:
         print(f"⚠️ Không tìm thấy cấu hình cho Ao ID: {pond_key}")
         return
+    
+    #publish to adafruit
+    if(str(sensor_type).upper() == "TEMP" and str(pond_key) == "TRAM_01"):
+        publish_sensor_pond1(sensor_type, value)
 
     # Lấy cấu hình và sensor_ids tương ứng với ao hiện tại
     config = ponds_data[pond_key]["config"]
@@ -221,19 +235,19 @@ def processData(pond_key, sensor_type, value):
     
     # Chỉ tự động chạy nếu đang ở chế độ AUTO
     if config["MODE"] == "AUTO":
-        if sensor_type == "DO":
-            if value < config["DO"]["min"]:
-                control_device(pond_key, "AERATOR", "ON")
-            elif value > config["DO"]["max"]:
-                control_device(pond_key, "AERATOR", "OFF")
+        # if sensor_type == "DO":
+        #     if value < config["DO"]["min"]:
+        #         control_device(pond_key, "AERATOR", "ON")
+        #     elif value > config["DO"]["max"]:
+        #         control_device(pond_key, "AERATOR", "OFF")
                 
-        elif sensor_type == "PH":
-            if value < config["PH"]["min"] or value > config["PH"]["max"]:
-                control_device(pond_key, "PUMP", "ON")
-            else:
-                control_device(pond_key, "PUMP", "OFF")
+        # elif sensor_type == "PH":
+        #     if value < config["PH"]["min"] or value > config["PH"]["max"]:
+        #         control_device(pond_key, "PUMP", "ON")
+        #     else:
+        #         control_device(pond_key, "PUMP", "OFF")
                 
-        elif sensor_type == "TEMP":
+        if sensor_type == "TEMP":
             if value > config["TEMP"]["high"]:
                 control_device(pond_key, "FAN", "ON")
             elif value <= config["TEMP"]["low"]:
@@ -253,6 +267,9 @@ def processData(pond_key, sensor_type, value):
             print(f"  -> SERVER BÁO LỖI: {res.status_code} - Chi tiết: {res.text}")
     except Exception as e:
         print(f"  -> LỖI GỬI API SENSOR: {e}")
+
+    if str(pond_key) == "1":
+        publish_sensor_pond1(sensor_type, value)
 
 
 def check_feeder_schedule():
@@ -290,6 +307,8 @@ except Exception as e:
     print(f"❌ Lỗi kết nối cổng Serial COM: {e}")
     isMicrobitConnected = False
 
+# Khởi tạo kết nối với Adafruit IO
+init_adafruit()
 
 
 # Biến toàn cục lưu nhiệt độ thật gần nhất nhận được
@@ -355,16 +374,16 @@ def fakeSerial():
     # Tạo dữ liệu giả định kỳ cho các ao
     for pond_key in ponds_data.keys():
         
-        # 1. Luôn fake DO và PH cho tất cả các ao
-        fake_do = round(random.uniform(4.5, 7.5), 1)     
-        fake_ph = round(random.uniform(6.0, 8.5), 1) 
-        processData(pond_key, "DO", fake_do)
-        processData(pond_key, "PH", fake_ph)
+        # # 1. Luôn fake DO và PH cho tất cả các ao
+        # fake_do = round(random.uniform(4.5, 7.5), 1)     
+        # fake_ph = round(random.uniform(6.0, 8.5), 1) 
+        # processData(pond_key, "DO", fake_do)
+        # processData(pond_key, "PH", fake_ph)
 
         # 2. Fake TEMP cho các ao KHÔNG có cảm biến thật
         if pond_key != real_temp_pond_id:
             # Tạo nhiệt độ ảo chênh lệch một chút (+- 0.5 độ) so với ao có cảm biến thật
-            fake_temp = round(latest_real_temp + random.uniform(-0.5, 0.5), 1)
+            fake_temp = round(latest_real_temp + random.uniform(-5, 2), 1)
             processData(pond_key, "TEMP", fake_temp)
 
 # Hàm kiểm tra tín hiệu reload từ server để cập nhật lại cấu trúc ao nếu có thay đổi
@@ -396,7 +415,7 @@ sync_counter = 0
 
 while True:
     # 1. Định kỳ đồng bộ cấu hình cho tất cả các ao
-    if sync_counter % 3 == 0: # Mỗi 3 vòng (tương đương khoảng 9-10 giây) sẽ đồng bộ một lần
+    if sync_counter % 3 == 0: 
         for pond_key in list(ponds_data.keys()):
             #cập nhật thay đổi cấu hình và lịch trình từ server, đồng thời cập nhật trạng thái thiết bị để đồng bộ với lệnh thủ công từ app
             sync_config_from_server(pond_key)
@@ -407,7 +426,7 @@ while True:
     # 2. Đọc dữ liệu thực tế từ mạch và tạo dữ liệu giả
     if isMicrobitConnected:
         readSerial()
-        fakeSerial() 
+        fakeSerial()
     else:
         fakeSerial() 
 

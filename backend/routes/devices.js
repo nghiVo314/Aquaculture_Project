@@ -246,7 +246,6 @@ router.get('/feeding-formulas', requireAuth, async (req, res) => {
     }
 });
 
-
 // Thêm công thức cho ăn mới - Yêu cầu quyền 'device:status:update'
 router.post('/feeding-formulas', requireAuth, requirePermission('device:status:update'), async (req, res) => {
     const { ma_cong_thuc, ti_le_cho_an, thong_tin_bo_sung } = req.body;
@@ -257,6 +256,16 @@ router.post('/feeding-formulas', requireAuth, requirePermission('device:status:u
             [ma_cong_thuc, ti_le_cho_an || null, thong_tin_bo_sung || null]
         );
         res.json({ status: 'success', message: 'Đã thêm công thức' });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Xóa công thức cho ăn - Yêu cầu quyền 'device:status:update'
+router.delete('/feeding-formulas/:id', requireAuth, requirePermission('device:status:update'), async (req, res) => {
+    try {
+        await db.execute('DELETE FROM cong_thuc_cho_an WHERE ma_cong_thuc = ?', [req.params.id]);
+        res.json({ status: 'success', message: 'Đã xóa công thức' });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }

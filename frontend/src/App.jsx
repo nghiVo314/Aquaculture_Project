@@ -5,13 +5,13 @@ import { BrowserRouter as Router, Navigate, Route, Routes } from 'react-router-d
 import DashboardPage from './pages/DashboardPage';
 import LoginPage from './pages/LoginPage';
 import LogsPage from './pages/LogsPage';
-import ManagementPage from './pages/ManagementPage';
+// import ManagementPage from './pages/ManagementPage';
 import RegisterPage from './pages/RegisterPage';
-import ControlPanelPage from './pages/ControlPanelPage';
+// import ControlPanelPage from './pages/ControlPanelPage';
 
 // Import các trang MỚI BỔ SUNG
 import UserManagementPage from './pages/UserManagementPage';
-import SchedulePage from './pages/SchedulePage';
+// import SchedulePage from './pages/SchedulePage';
 import PondDetailPage from './pages/PondDetailPage';
 import ReportPage from './pages/ReportPage';
 
@@ -69,20 +69,20 @@ const AppRoutes = () => {
         {/* ROUTE MỚI: Danh sách ao của một khu vực */}
         <Route path="khu-vuc/:zoneId/ao" element={<ZonePondsPage />} />
         <Route path="logs" element={<LogsPage />} />
-        <Route path="control" element={<ControlPanelPage />} />
-        <Route path="schedules" element={<SchedulePage />} />
+        {/* <Route path="control" element={<ControlPanelPage />} />
+        <Route path="schedules" element={<SchedulePage />} /> */}
         <Route path="reports" element={<ReportPage />} />
         <Route path="ao-nuoi/:id" element={<PondDetailPage />} />
         
         {/* Trang Quản lý Không gian & Thiết bị: Chỉ Admin và Manager mới vào được */}
-        <Route
+        {/* <Route
           path="management"
           element={
             <RoleRoute allow={['admin', 'manager']}>
               <ManagementPage />
             </RoleRoute>
           }
-        />
+        /> */}
 
         {/* Trang Quản lý User: CHỈ DÀNH CHO ADMIN */}
         <Route

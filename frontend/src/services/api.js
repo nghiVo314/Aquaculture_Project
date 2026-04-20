@@ -190,9 +190,28 @@ export const updatePondMode = async (pondId, mode) => {
 
 export const getFeedingFormulas = () => request('/devices/feeding-formulas');
 
+// Thêm công thức cho ăn mới
 export const addFeedingFormula = (payload) =>
     request('/devices/feeding-formulas', {
         method: 'POST',
         body: JSON.stringify(payload)
     });
-    
+
+//xóa công thức
+// Thêm vào src/services/api.js
+
+// Xóa công thức cho ăn
+export const deleteFeedingFormula = async (id) => {
+    const token = localStorage.getItem('aq_token');
+    const res = await fetch(`http://127.0.0.1:5000/api/devices/feeding-formulas/${id}`, {
+        method: 'DELETE',
+        headers: { 
+            'Authorization': `Bearer ${token}` 
+        }
+    });
+    if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error || 'Lỗi xóa công thức');
+    }
+    return res.json();
+};
