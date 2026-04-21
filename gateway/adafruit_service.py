@@ -61,4 +61,3 @@ def publish_device_pond1(device_name, action):
     if feed:
         value = 1 if action == "ON" else 0
         publish(feed, value)
-        print("fuckkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk")
