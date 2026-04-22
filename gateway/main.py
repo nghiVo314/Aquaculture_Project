@@ -41,6 +41,7 @@ def init_ponds_data_from_server():
                         # "DO": {"min": 5.0, "max": 7.0},  # Sẽ được cập nhật lại bằng sync_config_from_server
                         # "PH": {"min": 5.0, "max": 8.0},
                         "TEMP": {"high": 28, "low": 25},
+                        "LIGHT": {"high": 40, "low": 9},
                         "MODE": "AUTO"
                     },
                     "device_status": {
@@ -114,6 +115,9 @@ def sync_config_from_server(pond_key):
                 if loai == "TEMP":
                     ponds_data[pond_key]["config"]["TEMP"]["low"] = item["min_value"]
                     ponds_data[pond_key]["config"]["TEMP"]["high"] = item["max_value"]
+                elif loai == "LIGHT":
+                    ponds_data[pond_key]["config"]["LIGHT"]["low"] = item["min_value"]
+                    ponds_data[pond_key]["config"]["LIGHT"]["high"] = item["max_value"]
                 # elif loai in ["DO", "PH"]:
                 #     ponds_data[pond_key]["config"][loai]["min"] = item["min_value"]
                 #     ponds_data[pond_key]["config"][loai]["max"] = item["max_value"]
@@ -221,9 +225,10 @@ def processData(pond_key, sensor_type, value):
     if pond_key not in ponds_data:
         print(f"⚠️ Không tìm thấy cấu hình cho Ao ID: {pond_key}")
         return
-    
     #publish to adafruit
     if(str(sensor_type).upper() == "TEMP" and str(pond_key) == "TRAM_01"):
+        publish_sensor_pond1(sensor_type, value)
+    elif(str(sensor_type).upper() == "LIGHT" and str(pond_key) == "TRAM_01"):
         publish_sensor_pond1(sensor_type, value)
 
     # Lấy cấu hình và sensor_ids tương ứng với ao hiện tại
@@ -240,18 +245,19 @@ def processData(pond_key, sensor_type, value):
         #         control_device(pond_key, "AERATOR", "ON")
         #     elif value > config["DO"]["max"]:
         #         control_device(pond_key, "AERATOR", "OFF")
-                
-        # elif sensor_type == "PH":
-        #     if value < config["PH"]["min"] or value > config["PH"]["max"]:
-        #         control_device(pond_key, "PUMP", "ON")
-        #     else:
-        #         control_device(pond_key, "PUMP", "OFF")
+            
                 
         if sensor_type == "TEMP":
             if value > config["TEMP"]["high"]:
                 control_device(pond_key, "FAN", "ON")
             elif value <= config["TEMP"]["low"]:
                 control_device(pond_key, "FAN", "OFF")
+
+        elif sensor_type == "LIGHT":
+            if value > config["LIGHT"]["high"]:
+                control_device(pond_key, "PUMP", "ON")
+            elif value <= config["LIGHT"]["low"]:
+                control_device(pond_key, "PUMP", "OFF")
 
     # Gửi dữ liệu về backend    
     try:
@@ -311,35 +317,30 @@ except Exception as e:
 init_adafruit()
 
 
-# Biến toàn cục lưu nhiệt độ thật gần nhất nhận được
-latest_real_temp = 28.5  # Giá trị mặc định ban đầu
-real_temp_pond_id = ""  # khi kết nối mạch thật thì gán nó bằng 1
-
 mess = "" 
 # Hàm phân tích dữ liệu Serial nhận được từ mạch
 def parseSerialData(data_string):
-    global latest_real_temp, real_temp_pond_id
-    """
-    Chuỗi giả định mạch gửi lên: !<POND_ID>:<LOẠI_CẢM_BIẾN>:<GIÁ_TRỊ>#
-    """
     try:
         clean_data = data_string.replace("!", "").replace("#", "")
         splitData = clean_data.split(":")
-        
+
         if len(splitData) >= 3:
-            pond_key = splitData[0]     
-            sensor_type = splitData[1]  
-            value = float(splitData[2]) 
+            pond_key = splitData[0]
+            item_type = splitData[1]
+            raw_value = splitData[2]
 
-            # Nếu nhận được nhiệt độ thật từ mạch, lưu lại làm chuẩn, để gen ra nhiệt độ ảo
-            if sensor_type == "TEMP":
-                latest_real_temp = value
-                real_temp_pond_id = pond_key # Cập nhật ID ao đang sở hữu cảm biến thật
+            # Nếu là cảm biến số
+            if item_type in ["TEMP", 'LIGHT']:
+                value = float(raw_value)
+                print(f"Nhận dữ liệu cảm biến: Ao {pond_key} - {item_type} = {value}")
+                processData(pond_key, item_type, value)
 
-            # Xử lý và lưu dữ liệu bình thường
-            processData(pond_key, sensor_type, value)
+            # Nếu là trạng thái thiết bị
+            elif item_type in ["FAN", "PUMP", "FEEDER", "AERATOR"]:
+                print(f"Thiết bị phản hồi: Ao {pond_key} - {item_type} = {raw_value}")
+
     except Exception as e:
-        print(f"⚠️ Lỗi phân tích dữ liệu Serial: {data_string} -> {e}")
+        print(f"Lỗi Serial: {data_string} -> {e}")
 
 #đọc dữ liệu từ cổng serial, tìm kiếm chuỗi dữ liệu hoàn chỉnh nằm giữa '!' và '#', sau đó gọi hàm parseSerialData để xử lý
 def readSerial():
@@ -351,7 +352,6 @@ def readSerial():
         bytesToRead = ser.inWaiting()
         if bytesToRead > 0:
             mess = mess + ser.read(bytesToRead).decode("UTF-8")
-            
             while ("#" in mess) and ("!" in mess):
                 start = mess.find("!")
                 end = mess.find("#")
@@ -367,9 +367,13 @@ def readSerial():
     except Exception as e:
         pass
 
+
+latest_real_temp= 27.0
+latest_real_light = 20.0
+real_temp_pond_id = None
 # Hàm tạo dữ liệu giả cho DO, PH và TEMP (chỉ fake TEMP cho ao không có cảm biến thật)
 def fakeSerial():
-    global latest_real_temp, real_temp_pond_id
+    global latest_real_temp, latest_real_light, real_temp_pond_id
     
     # Tạo dữ liệu giả định kỳ cho các ao
     for pond_key in ponds_data.keys():
@@ -385,6 +389,8 @@ def fakeSerial():
             # Tạo nhiệt độ ảo chênh lệch một chút (+- 0.5 độ) so với ao có cảm biến thật
             fake_temp = round(latest_real_temp + random.uniform(-5, 2), 1)
             processData(pond_key, "TEMP", fake_temp)
+            fake_light = round(latest_real_light + random.uniform(-20, 30), 1)
+            processData(pond_key, "LIGHT", fake_light)
 
 # Hàm kiểm tra tín hiệu reload từ server để cập nhật lại cấu trúc ao nếu có thay đổi
 def check_reload_signal():
@@ -426,7 +432,6 @@ while True:
     # 2. Đọc dữ liệu thực tế từ mạch và tạo dữ liệu giả
     if isMicrobitConnected:
         readSerial()
-        fakeSerial()
     else:
         fakeSerial() 
 

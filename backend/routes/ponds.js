@@ -53,8 +53,8 @@ router.post('/', requireAuth, requirePermission('pond:create'), async (req, res)
         const sensors = [
             // { id: `CB_DO_${ma_ao_nuoi}`, type: 'DO' },
             // { id: `CB_PH_${ma_ao_nuoi}`, type: 'PH' },
-            { id: `CB_TEMP_${ma_ao_nuoi}`, type: 'TEMP' }
-            //{ id: `CB_LIGHT_${ma_ao_nuoi}`, type: 'LIGHT' }
+            { id: `CB_TEMP_${ma_ao_nuoi}`, type: 'TEMP' },
+            { id: `CB_LIGHT_${ma_ao_nuoi}`, type: 'LIGHT' }
         ];
 
         for (let s of sensors) {
@@ -80,7 +80,8 @@ router.post('/', requireAuth, requirePermission('pond:create'), async (req, res)
         const rules = [
             // { id: `RULE_DO_${ma_ao_nuoi}`, cb: `CB_DO_${ma_ao_nuoi}`, dk: `DK_AERATOR_${ma_ao_nuoi}`, min: 5.0, max: 7.0 },
             // { id: `RULE_PH_${ma_ao_nuoi}`, cb: `CB_PH_${ma_ao_nuoi}`, dk: `DK_PUMP_${ma_ao_nuoi}`, min: 5.0, max: 8.0 },
-            { id: `RULE_TEMP_${ma_ao_nuoi}`, cb: `CB_TEMP_${ma_ao_nuoi}`, dk: `DK_FAN_${ma_ao_nuoi}`, min: 25.0, max: 28.0 }
+            { id: `RULE_TEMP_${ma_ao_nuoi}`, cb: `CB_TEMP_${ma_ao_nuoi}`, dk: `DK_FAN_${ma_ao_nuoi}`, min: 25.0, max: 28.0 },
+            { id: `RULE_LIGHT_${ma_ao_nuoi}`, cb: `CB_LIGHT_${ma_ao_nuoi}`, dk: `DK_FEEDER_${ma_ao_nuoi}`, min: 9.0, max: 40.0 }
         ];
 
         for (let r of rules) {
