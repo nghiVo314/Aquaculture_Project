@@ -24,7 +24,7 @@ const LogsPage = () => {
       <div className="panel-head">
         <h2>Nhat ky he thong</h2>
         <button type="button" onClick={fetchLogs}>
-          Tai lai
+          tải lại
         </button>
       </div>
 

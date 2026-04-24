@@ -38,6 +38,7 @@ def publish_sensor_pond1(sensor_type, value):
 
     feeds = {
         "TEMP": "bbc-temp",
+        "LIGHT": "bbc-light"
     }
 
     feed = feeds.get(sensor_type)

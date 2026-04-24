@@ -4,14 +4,34 @@ const router = express.Router();
 const db = require('../services/db');
 // Đã thay authorizeRoles bằng requirePermission
 const { requireAuth, requirePermission } = require('../middlewares/rbac');
+
 // GET all regions - Yêu cầu đăng nhập
 router.get('/', requireAuth, async (req, res) => {
     try {
-        const [rows] = await db.execute(`
+        // 1. Lấy thông tin user đã được giải mã từ token (thông qua middleware requireAuth)
+        const userId = req.user.id;
+        const userRoles = req.user.roles || [];
+
+        // 2. Kiểm tra xem người dùng có role 'admin' hay không
+        const isAdmin = userRoles.includes('admin');
+
+        // 3. Khởi tạo câu truy vấn cơ bản
+        let query = `
             SELECT ma_khu_vuc as ID, loai_thuy_san as LoaiHaiSan, ma_nguoi_dung_quan_ly 
             FROM khu_vuc
-        `);
+        `;
+        let queryParams = [];
+
+        // 4. Nếu KHÔNG phải admin, thêm điều kiện WHERE để chỉ lấy khu vực do user này quản lý
+        if (!isAdmin) {
+            query += ` WHERE ma_nguoi_dung_quan_ly = ?`;
+            queryParams.push(userId);
+        }
+
+        // 5. Thực thi câu truy vấn
+        const [rows] = await db.execute(query, queryParams);
         res.json(rows);
+
     } catch (error) {
         res.status(500).json({ error: error.message });
     }

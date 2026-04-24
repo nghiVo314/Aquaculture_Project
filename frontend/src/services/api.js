@@ -215,3 +215,29 @@ export const deleteFeedingFormula = async (id) => {
     }
     return res.json();
 };
+
+export const createUser = async (payload) => {
+    const token = localStorage.getItem('aq_token');
+    const res = await fetch('http://127.0.0.1:5000/api/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify(payload)
+    });
+    if (!res.ok) throw new Error('Lỗi tạo người dùng');
+    return res.json();
+};
+
+export const updateUserRole = async (userId, ma_role) => {
+    const token = localStorage.getItem('aq_token');
+    const res = await fetch(`http://127.0.0.1:5000/api/users/${userId}/role`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ ma_role })
+    });
+    if (!res.ok) throw new Error('Lỗi cập nhật role');
+    return res.json();
+};
+
+export const getReportSensors = (days = 7) =>
+    request(`/ponds/sensor-report?days=${days}`);
+

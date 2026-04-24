@@ -278,4 +278,111 @@ router.put('/:id/mode', requireAuth, requirePermission('pond:update:config'), as
     }
 });
 
+// GET /api/ponds/report-summary
+router.get('/report-summary', async (req, res) => {
+    try {
+        // Lấy danh sách khu vực
+        const [zones] = await db.execute(`
+            SELECT ma_khu_vuc, loai_thuy_san
+            FROM khu_vuc
+            ORDER BY ma_khu_vuc
+        `);
+
+        const reportData = [];
+
+        for (const zone of zones) {
+            // Lấy danh sách ao + giá trị TEMP / LIGHT mới nhất
+            const [ponds] = await db.execute(`
+                SELECT 
+                    a.ma_ao_nuoi,
+                    a.dien_tich,
+                    a.che_do,
+                    t.trang_thai_cloud,
+
+                    -- nhiệt độ mới nhất
+                    (
+                        SELECT dl.gia_tri
+                        FROM du_lieu_quan_trac dl
+                        JOIN cam_bien cb ON dl.ma_cam_bien = cb.ma_thiet_bi
+                        WHERE cb.loai_cam_bien = 'TEMP'
+                          AND cb.ma_thiet_bi IN (
+                              SELECT tb2.ma_thiet_bi
+                              FROM thiet_bi_tai_bien tb2
+                              WHERE tb2.ma_tram = t.ma_tram
+                          )
+                        ORDER BY dl.thoi_gian DESC
+                        LIMIT 1
+                    ) AS nhiet_do_hien_tai,
+
+                    -- ánh sáng mới nhất
+                    (
+                        SELECT dl.gia_tri
+                        FROM du_lieu_quan_trac dl
+                        JOIN cam_bien cb ON dl.ma_cam_bien = cb.ma_thiet_bi
+                        WHERE cb.loai_cam_bien = 'LIGHT'
+                          AND cb.ma_thiet_bi IN (
+                              SELECT tb2.ma_thiet_bi
+                              FROM thiet_bi_tai_bien tb2
+                              WHERE tb2.ma_tram = t.ma_tram
+                          )
+                        ORDER BY dl.thoi_gian DESC
+                        LIMIT 1
+                    ) AS anh_sang_hien_tai
+
+                FROM ao_nuoi a
+                LEFT JOIN tram_bien t ON a.ma_ao_nuoi = t.ma_ao_nuoi
+                WHERE a.ma_khu_vuc = ?
+                ORDER BY a.ma_ao_nuoi
+            `, [zone.ma_khu_vuc]);
+
+            reportData.push({
+                ma_khu_vuc: zone.ma_khu_vuc,
+                loai_thuy_san: zone.loai_thuy_san,
+                danh_sach_ao: ponds
+            });
+        }
+
+        res.json(reportData);
+
+    } catch (error) {
+        console.error('report-summary error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+
+// GET /api/ponds/sensor-report?days=7&type=TEMP
+router.get('/sensor-report', async (req, res) => {
+    const days = parseInt(req.query.days || 7);
+    const type = (req.query.type || 'TEMP').toUpperCase(); // TEMP | LIGHT
+
+    try {
+        const [rows] = await db.execute(`
+            SELECT
+                an.ma_ao_nuoi,
+                DATE_FORMAT(dl.thoi_gian, '%Y-%m-%d %H:%i:%s') AS thoi_gian,
+                dl.gia_tri,
+                cb.loai_cam_bien
+            FROM du_lieu_quan_trac dl
+            JOIN cam_bien cb 
+                ON dl.ma_cam_bien = cb.ma_thiet_bi
+            JOIN thiet_bi_tai_bien tb 
+                ON cb.ma_thiet_bi = tb.ma_thiet_bi
+            JOIN tram_bien tr 
+                ON tb.ma_tram = tr.ma_tram
+            JOIN ao_nuoi an 
+                ON tr.ma_ao_nuoi = an.ma_ao_nuoi
+            WHERE cb.loai_cam_bien = ?
+              AND dl.thoi_gian >= NOW() - INTERVAL ? DAY
+            ORDER BY dl.thoi_gian ASC
+        `, [type, days]);
+
+        res.json(rows);
+
+    } catch (error) {
+        console.error('sensor-report error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
 module.exports = router;;

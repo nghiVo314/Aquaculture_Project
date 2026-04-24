@@ -38,14 +38,11 @@ def init_ponds_data_from_server():
                     "ao_id": pond["ao_id"],
                     "feeder_id": pond["feeder_id"],
                     "config": {
-                        # "DO": {"min": 5.0, "max": 7.0},  # Sẽ được cập nhật lại bằng sync_config_from_server
-                        # "PH": {"min": 5.0, "max": 8.0},
                         "TEMP": {"high": 28, "low": 25},
                         "LIGHT": {"high": 40, "low": 9},
                         "MODE": "AUTO"
                     },
                     "device_status": {
-                        "AERATOR": "OFF",
                         "PUMP": "OFF",
                         "FAN": "OFF",
                         "FEEDER": "OFF"
@@ -118,9 +115,6 @@ def sync_config_from_server(pond_key):
                 elif loai == "LIGHT":
                     ponds_data[pond_key]["config"]["LIGHT"]["low"] = item["min_value"]
                     ponds_data[pond_key]["config"]["LIGHT"]["high"] = item["max_value"]
-                # elif loai in ["DO", "PH"]:
-                #     ponds_data[pond_key]["config"][loai]["min"] = item["min_value"]
-                #     ponds_data[pond_key]["config"][loai]["max"] = item["max_value"]
             
             print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Đã đồng bộ cấu hình ao {pond_key} từ Server!")
     except Exception as e:
@@ -146,7 +140,7 @@ def sync_device_status_from_server(pond_key):
                     control_device(pond_key, device_name, action)
 
                 #adafruit
-                if str(pond_key) == "TRAM_01":
+                if str(pond_key) == "TRAM_AO_01":
                     publish_device_pond1(device_name, action)
 
     except Exception as e:
@@ -226,9 +220,9 @@ def processData(pond_key, sensor_type, value):
         print(f"⚠️ Không tìm thấy cấu hình cho Ao ID: {pond_key}")
         return
     #publish to adafruit
-    if(str(sensor_type).upper() == "TEMP" and str(pond_key) == "TRAM_01"):
+    if(str(sensor_type).upper() == "TEMP" and str(pond_key) == "TRAM_AO_01"):
         publish_sensor_pond1(sensor_type, value)
-    elif(str(sensor_type).upper() == "LIGHT" and str(pond_key) == "TRAM_01"):
+    elif(str(sensor_type).upper() == "LIGHT" and str(pond_key) == "TRAM_AO_01"):
         publish_sensor_pond1(sensor_type, value)
 
     # Lấy cấu hình và sensor_ids tương ứng với ao hiện tại
@@ -421,13 +415,17 @@ sync_counter = 0
 
 while True:
     # 1. Định kỳ đồng bộ cấu hình cho tất cả các ao
-    if sync_counter % 3 == 0: 
-        for pond_key in list(ponds_data.keys()):
-            #cập nhật thay đổi cấu hình và lịch trình từ server, đồng thời cập nhật trạng thái thiết bị để đồng bộ với lệnh thủ công từ app
-            sync_config_from_server(pond_key)
-            sync_schedules_from_server(pond_key)
-            sync_device_status_from_server(pond_key)
-    sync_counter += 1
+    for pond_key in list(ponds_data.keys()):
+        sync_config_from_server(pond_key)
+        sync_schedules_from_server(pond_key)
+        sync_device_status_from_server(pond_key)
+    # if sync_counter % 3 == 0: 
+    #     for pond_key in list(ponds_data.keys()):
+    #         #cập nhật thay đổi cấu hình và lịch trình từ server, đồng thời cập nhật trạng thái thiết bị để đồng bộ với lệnh thủ công từ app
+    #         sync_config_from_server(pond_key)
+    #         sync_schedules_from_server(pond_key)
+    #         sync_device_status_from_server(pond_key)
+    # sync_counter += 1
 
     # 2. Đọc dữ liệu thực tế từ mạch và tạo dữ liệu giả
     if isMicrobitConnected:
@@ -441,4 +439,4 @@ while True:
     # 4. Kiểm tra tín hiệu reload khi có thay đổi (vd: thêm/sửa/xóa ao, thiết bị, cảm biến...)
     check_reload_signal()
     
-    time.sleep(3)
+    time.sleep(30)

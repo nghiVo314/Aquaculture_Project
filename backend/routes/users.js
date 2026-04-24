@@ -2,13 +2,15 @@ const express = require('express');
 const router = express.Router();
 const db = require('../services/db');
 
-// 1. Get all users and their assigned areas
+// 1. Lấy tất cả users (Cập nhật query theo DB mới)
 router.get('/', async (req, res) => {
     try {
         const [users] = await db.execute(
-            `SELECT u.ma_nguoi_dung as ID, u.ten_dang_nhap as TenDangNhap, u.trang_thai as TrangThai, r.role_name as RoleName, r.ma_role as Role_ID
+            `SELECT u.ma_nguoi_dung as ID, u.ten_dang_nhap as TenDangNhap, u.trang_thai as TrangThai, 
+                    r.role_name as RoleName, r.ma_role as Role_ID
              FROM nguoi_dung u
-             JOIN role r ON u.ma_role = r.ma_role`
+             LEFT JOIN nguoi_dung_role ur ON u.ma_nguoi_dung = ur.ma_nguoi_dung
+             LEFT JOIN role r ON ur.ma_role = r.ma_role`
         );
 
         for (let user of users) {
@@ -18,7 +20,7 @@ router.get('/', async (req, res) => {
                  WHERE ma_nguoi_dung_quan_ly = ?`,
                 [user.ID]
             );
-            user.KhuVucQuanLy = areas;
+            user.KhuVucQuanLy = areas || [];
         }
 
         res.json(users);
@@ -27,7 +29,53 @@ router.get('/', async (req, res) => {
     }
 });
 
-// 3. Update user area permissions
+// 2. Thêm người dùng mới & Gán Role
+router.post('/', async (req, res) => {
+    const { ten_dang_nhap, mat_khau, ma_role } = req.body;
+    const connection = await db.getConnection();
+    try {
+        await connection.beginTransaction();
+        const ma_nguoi_dung = `USR_${Date.now()}`; // Có thể dùng UUID
+        
+        // Thêm vào bảng nguoi_dung
+        await connection.execute(
+            `INSERT INTO nguoi_dung (ma_nguoi_dung, ten_dang_nhap, mat_khau) VALUES (?, ?, ?)`,
+            [ma_nguoi_dung, ten_dang_nhap, mat_khau] // Lưu ý: Nên hash password bằng bcrypt ở thực tế
+        );
+
+        // Gán role vào bảng nguoi_dung_role
+        if (ma_role) {
+            await connection.execute(
+                `INSERT INTO nguoi_dung_role (ma_nguoi_dung, ma_role) VALUES (?, ?)`,
+                [ma_nguoi_dung, ma_role]
+            );
+        }
+
+        await connection.commit();
+        res.json({ status: 'success', message: 'Tạo người dùng thành công' });
+    } catch (error) {
+        await connection.rollback();
+        res.status(400).json({ error: error.message });
+    } finally {
+        connection.release();
+    }
+});
+
+// 3. Cập nhật Role cho User
+router.put('/:id/role', async (req, res) => {
+    const { id } = req.params;
+    const { ma_role } = req.body;
+    try {
+        // Cập nhật đơn giản: Xóa role cũ và thêm role mới (giả định 1 user 1 role chính)
+        await db.execute(`DELETE FROM nguoi_dung_role WHERE ma_nguoi_dung = ?`, [id]);
+        await db.execute(`INSERT INTO nguoi_dung_role (ma_nguoi_dung, ma_role) VALUES (?, ?)`, [id, ma_role]);
+        res.json({ status: 'success', message: 'Cập nhật quyền thành công' });
+    } catch (error) {
+        res.status(400).json({ error: error.message });
+    }
+});
+
+// 4. Update user area permissions
 router.put('/:user_id/areas', async (req, res) => {
     const userId = req.params.user_id;
     const { khuvuc_ids } = req.body;
@@ -57,7 +105,7 @@ router.put('/:user_id/areas', async (req, res) => {
     }
 });
 
-// 4. Get permitted ponds for a specific worker
+// 5. Get permitted ponds for a specific worker
 router.get('/:user_id/my-ponds', async (req, res) => {
     try {
         const [ponds] = await db.execute(
