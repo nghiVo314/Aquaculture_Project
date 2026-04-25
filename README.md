@@ -1,394 +1,268 @@
-# 🌾 Aquaculture Management System (DADN Project)
+# Aquaculture Management System (Root Guide)
 
-**Hệ thống Quản lý và Vận hành Thủy sản Thông minh - AQUACULTUREFarm**
+README nay la tai lieu tong quan cho toan bo workspace (khong chi rieng frontend hoac backend).
 
----
-
-## 📖 Quick Navigation
-
-| Component | Location | Status | Lead |
-|-----------|----------|--------|------|
-| **Backend API** | [backend/README.md](backend/README.md) | 🟢 Ready (TDD setup) | Person 2-3 |
-| **Frontend Dashboard** | [frontend/README.md](frontend/README.md) | 🟢 Ready (Architecture designed) | Person 4 |
-| **Database Schema** | [backend/DATABASE_SCHEMA.sql](backend/DATABASE_SCHEMA.sql) | 🟢 Ready (15 tables) | Person 1 |
-| **API Specification** | [backend/API_ENDPOINTS.md](backend/API_ENDPOINTS.md) | 🟢 Ready (22 endpoints) | All |
-| **Development Workflow** | [backend/TDD_WORKFLOW.md](backend/TDD_WORKFLOW.md) | 🟢 Ready (3-day timeline) | All |
-| **Frontend Architecture** | [frontend/FRONTEND_STRUCTURE.md](frontend/FRONTEND_STRUCTURE.md) | 🟢 Ready (Components + hooks) | Person 4 |
+Muc tieu:
+- Giup ban hieu cau truc thu muc nhanh
+- Chay duoc he thong day du (DB + Backend + Frontend, va Gateway neu can)
+- Biet file nao quan trong de sua dung cho FE/BE
 
 ---
 
-## 🎯 Project Overview
+## 1. Tong Quan Kien Truc
 
-### **What We're Building**
-Real-time aquaculture monitoring dashboard for KHONGCOTEN farm with:
-- **3 farming zones** (Shrimp A, Fish B, Settling C)
-- **20+ ponds** with 40+ sensors each
-- **Real-time sensor readings** (DO, pH, Temperature, Salinity, ORP)
-- **Live dashboard** with charts and alerts
-- **Edge computing** with Adafruit IoT devices
-- **Activity audit logs** for compliance
-
-### **Tech Stack**
-
-| Layer | Technology | Version | Purpose |
-|-------|-----------|---------|---------|
-| **Backend** | Node.js + Express | 18.x + 5.2 | API server (REST endpoints) |
-| **Frontend** | React + Vite | Latest | Real-time dashboard UI |
-| **Database** | MySQL | 8.0+ | Time-series sensor data |
-| **Charts** | Recharts | Latest | Real-time visualization |
-| **Testing** | Jest + Supertest | Latest | Test-Driven Development |
-| **IoT** | Adafruit IO | API | Mock data until 27/03 |
-
-### **Architecture**
 ```
-┌──────────────────────────────────────────────────────┐
-│                 FRONTEND (React)                      │
-│        http://localhost:5173 (Vite dev server)       │
-├──────────────────────────────────────────────────────┤
-│                                                       │
-│  [Sidebar] → [Dashboard] → [SensorCards + Charts]   │
-│      ↓              ↓                ↓                │
-│   GET /zones  GET /sensors   GET /readings (poll)   │
-│                                                       │
-├──────────────────────────────────────────────────────┤
-│                  BACKEND (Express)                    │
-│        http://localhost:5000 (Node API server)      │
-├──────────────────────────────────────────────────────┤
-│                                                       │
-│  [Auth] → [Routes] → [Services] → [Database Pool]  │
-│  /zones   /sensors   db.js        MySQL async       │
-│  /ponds   /readings                                  │
-│  /alerts                                             │
-│                                                       │
-├──────────────────────────────────────────────────────┤
-│                  DATABASE (MySQL)                     │
-│           localhost:3306 (KHONGCOTEN)               │
-├──────────────────────────────────────────────────────┤
-│                                                       │
-│  Tables: zones, ponds, sensors, readings,           │
-│          devices, alerts, logs, users...            │
-│  17M records/day (high-volume time-series)          │
-│                                                       │
-└──────────────────────────────────────────────────────┘
+Frontend (React + Vite)      http://localhost:5173
+				|
+				| HTTP /api/*
+				v
+Backend (Node.js + Express)  http://localhost:5000
+				|
+				v
+MySQL Database               (schema ql_ao_nuoi)
+
+Gateway (Python, optional) -> gui du lieu cam bien ve Backend
 ```
 
 ---
 
-## 🚀 5-Minute Setup (All 3 Services)
+## 2. Cau Truc Thu Muc Chinh
 
-### **Prerequisites**
+```
+Aquaculture/
+|- backend/              # API server + business logic + DB access
+|- frontend/             # React app
+|- gateway/              # Python service mo phong/doc du lieu edge device
+|- create_database.sql   # SQL khoi tao DB + seed co ban
+|- HOW TO RUN.txt        # Huong dan chay nhanh bang tay
+|- README.md             # Tai lieu tong quan (file nay)
+```
+
+Chi tiet nhanh:
+- backend:
+	- server.js: Entry point cua Express, map route /api/*
+	- routes/: tung module API (auth, sensors, ponds, zones, devices, ...)
+	- services/db.js: MySQL pool (mysql2/promise)
+	- env_template.md: mau bien moi truong
+- frontend:
+	- src/App.jsx: Router + protected routes theo role
+	- src/services/api.js: ham goi API ve backend
+	- src/pages/: cac trang man hinh
+	- src/components/: component UI tai su dung
+- gateway:
+	- main.py: vong lap nhan/sinh du lieu cam bien, dong bo ve backend
+	- adafruit_service.py: publish du lieu len Adafruit IO
+
+---
+
+## 3. Yeu Cau Moi Truong
+
+- Node.js 18+
+- npm 8+
+- MySQL 8+
+- Python 3.10+ (neu chay gateway)
+
+Kiem tra nhanh:
+
 ```bash
-node --version    # v18+
-npm --version     # v8+
-mysql --version   # v8.0+
+node --version
+npm --version
+mysql --version
+python --version
 ```
 
-### **1. Start Backend**
+---
+
+## 4. Setup Tu Dau (Dung Thu Tu)
+
+### B1) Tao va nap Database
+
+Luu y: SQL hien tai tao database ten `ql_ao_nuoi`.
+
+```bash
+mysql -u root -p < create_database.sql
+```
+
+Kiem tra:
+
+```bash
+mysql -u root -p -e "SHOW DATABASES LIKE 'ql_ao_nuoi';"
+mysql -u root -p -D ql_ao_nuoi -e "SHOW TABLES;"
+```
+
+Neu ban muon dung file dump day du lieu lon hon, co the import `backend/newdb.sql` thay vi `create_database.sql`.
+
+### B2) Cau hinh Backend `.env`
+
+Trong thu muc `backend`, tao/chinh file `.env`:
+
+```env
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_USER=root
+DB_PASS=
+DB_NAME=ql_ao_nuoi
+PORT=5000
+TOKEN=your_secret_key
+```
+
+Luu y:
+- Trong code, `services/db.js` doc bien `DB_PASS` (khong phai `DB_PASSWORD`).
+- Phai dam bao `DB_NAME` khop voi database ban da import.
+
+### B3) Chay Backend
+
 ```bash
 cd backend
 npm install
-npm start          # Listens on http://localhost:5000
+npm start
 ```
 
-*Expected output:* `Server running on port 5000`  
-*Verify:* `curl http://localhost:5000/api/sensors` → should return JSON
+Backend se chay tai `http://localhost:5000`.
 
-### **2. Start Frontend**
+Test nhanh:
+
+```bash
+curl http://localhost:5000/
+curl http://localhost:5000/api/sensors/latest
+```
+
+### B4) Chay Frontend
+
+Mo terminal moi:
+
 ```bash
 cd frontend
 npm install
-npm run dev        # Listens on http://localhost:5173
+npm run dev
 ```
 
-*Expected output:* `VITE v5.0.0 ready in 123 ms`  
-*Verify:* Open http://localhost:5173 in browser
+Frontend se chay tai `http://localhost:5173`.
 
-### **3. Setup Database** *(One-time)*
+### B5) Chay Gateway (optional, neu can data realtime)
+
+Mo terminal moi:
+
 ```bash
-# Create database
-mysql -u root -p -e "CREATE DATABASE aquaculture_db;"
-
-# Import schema
-mysql -u root -p aquaculture_db < backend/DATABASE_SCHEMA.sql
-
-# Verify
-mysql -u root -p aquaculture_db -e "SHOW TABLES;"
+python gateway/main.py
 ```
 
-**✅ All three services running!** Dashboard should display zones and sensors.
+Gateway can Backend dang chay truoc de goi API `/api/ponds/gateway-init` va cac endpoint devices/sensors.
 
 ---
 
-## 📋 Team Structure & Tasks (5 People)
+## 5. Cach Hieu Backend Nhanh
 
-### **Person 1: Database Admin**
-**Role:** MySQL setup, schema management, data migration  
-**Deliverables:**
-- [ ] MySQL installed + running
-- [ ] Database created: `aquaculture_db`
-- [ ] Schema imported: `DATABASE_SCHEMA.sql`
-- [ ] Test data verified (3 zones, 20 ponds, 4 sensors, 4 users)
-- [ ] Create `backend/services/db.js` (connection pool)
+Luong xu ly chinh:
+1. `backend/server.js` khoi tao Express + CORS + JSON body parser.
+2. Server map route vao `/api/*`:
+	 - `/api/auth`
+	 - `/api/sensors`
+	 - `/api/dashboard`
+	 - `/api/logs`
+	 - `/api/alerts`
+	 - `/api/ponds`
+	 - `/api/users`
+	 - `/api/zones`
+	 - `/api/devices`
+3. Moi route goi `services/db.js` de query MySQL.
+4. Auth/RBAC nam o `middlewares/auth.js` va `middlewares/rbac.js`.
 
-**Reference:** [backend/DATABASE_SCHEMA.sql](backend/DATABASE_SCHEMA.sql)
+File nen doc dau tien (BE):
+- `backend/server.js`
+- `backend/services/db.js`
+- `backend/routes/auth.js`
+- `backend/routes/sensors.js`
+- `backend/routes/ponds.js`
+- `backend/routes/devices.js`
 
-### **Person 2: Backend API (Sensors Module)**
-**Role:** Implement sensor endpoints, replace mock data with real DB queries  
-**Deliverables:**
-- [ ] GET `/api/sensors` - list all sensors
-- [ ] GET `/api/sensors/:sensorId/latest` - latest reading
-- [ ] GET `/api/sensors/:sensorId/history` - 24h history
-- [ ] Tests remain GREEN (`npm run test:once`)
-- [ ] Error handling for DB failures
+Test backend:
 
-**Reference:** [backend/API_ENDPOINTS.md](backend/API_ENDPOINTS.md#module-1-sensors)  
-**Start:** `backend/routes/sensors.js` (mock skeleton ready)
-
-### **Person 3: Backend API (Zones/Ponds/Alerts)**
-**Role:** Implement remaining core endpoints  
-**Deliverables:**
-- [ ] GET `/api/zones` - list zones
-- [ ] GET `/api/zones/:zoneId/ponds` - list ponds in zone
-- [ ] GET `/api/ponds/:pondCode/farming-cycle` - cycle info
-- [ ] GET `/api/dashboard/status` - summary KPIs
-- [ ] GET `/api/alerts` (Module 2) - active alerts
-- [ ] Tests remain GREEN
-
-**Reference:** [backend/API_ENDPOINTS.md](backend/API_ENDPOINTS.md)
-
-### **Person 4: Frontend Dashboard**
-**Role:** Build React components, integrate with API  
-**Deliverables:**
-- [ ] Sidebar component (zone/pond selector)
-- [ ] SensorCard component (MVP priority)
-- [ ] SensorChart (Recharts line chart)
-- [ ] Dashboard page (layout + integration)
-- [ ] Real-time polling (`useReadings` hook)
-- [ ] Responsive design (mobile + desktop)
-
-**Reference:** [frontend/FRONTEND_STRUCTURE.md](frontend/FRONTEND_STRUCTURE.md)  
-**Start:** `frontend/src/components/` (use examples in README)
-
-### **Person 5: Integration & QA**
-**Role:** End-to-end testing, bug fixes, video demo  
-**Deliverables:**
-- [ ] Run MVP checklist (see below)
-- [ ] Test all 7 core endpoints
-- [ ] Verify real-time data updates (5s polling)
-- [ ] Check responsive design
-- [ ] Record demo video for 23/03
-- [ ] Prepare presentation slides
-
-**Reference:** MVP Checklist section below
-
----
-
-## 📅 Critical Timeline
-
-| Phase | Dates | Module | Deadline | Deliverable |
-|-------|-------|--------|----------|-------------|
-| **MVP Sprint** | 19-23 Mar | Module 1 | **23 Mar** | Sensor dashboard |
-| **Extended** | 24-27 Mar | Module 2 | 27 Mar | Alerts + logs |
-| **Features** | 28 Mar-20 Apr | Module 3-5 | 20 Apr | Full system |
-
-### **23 March Demo (Module 1 - MVP)**
-✅ Must-have:
-- Zones list (GET /api/zones)
-- Ponds by zone (GET /api/zones/:id/ponds)
-- Latest sensor readings (GET /api/sensors/:id/latest)
-- 24h sensor history (GET /api/sensors/:id/history)
-- Dashboard with live cards + charts
-
-🟡 Nice-to-have:
-- System status KPIs
-- Alert notifications
-- Device control UI
-
----
-
-## ✅ MVP Checklist (Before 23 Mar Demo)
-
-### **Backend**
-- [ ] 7 core endpoints implemented
-- [ ] `npm run test:once` - all tests PASSING ✅
-- [ ] Database queries replace mock data
-- [ ] Error handling working (404, 500)
-- [ ] API response format consistent {success, data, timestamp}
-- [ ] CORS enabled for frontend
-
-### **Frontend**
-- [ ] Dependencies installed: `npm install`
-- [ ] `npm run dev` starts without errors
-- [ ] Sidebar loads zones from API
-- [ ] Selecting zone loads ponds
-- [ ] SensorCard displays latest readings
-- [ ] Charts show 24h history
-- [ ] Real-time polling (data updates every 5 seconds)
-- [ ] Responsive design (works on mobile + desktop)
-- [ ] No errors in browser console (F12)
-
-### **Database**
-- [ ] MySQL running locally
-- [ ] Database `aquaculture_db` created
-- [ ] All 15 tables created (verify: `SHOW TABLES;`)
-- [ ] Test data inserted (3 zones, 20 ponds, 4 sensors)
-- [ ] Connection pool working in Node.js
-
-### **Integration**
-- [ ] Backend + Frontend communicate successfully
-- [ ] Real-time sensor data displays in dashboard
-- [ ] Charts update every 5 seconds with new data
-- [ ] No API errors in Network tab (F12)
-- [ ] All 7 endpoints tested with Postman/curl
-
-### **Demo**
-- [ ] Video recorded (2-3 minutes)
-- [ ] Shows zones → ponds → sensor data
-- [ ] Demonstrates real-time updates
-- [ ] Submitted to LMS before deadline
-
----
-
-## 📁 File Location Guide
-
-### **Backend Setup Files**
-- 📄 [backend/package.json](backend/package.json) - Dependencies + npm scripts
-- 🔧 [backend/server.js](backend/server.js) - Express app + routes
-- 🗄️ [backend/services/db.js](backend/services/db.js) - MySQL pool (Person 1 creates)
-- 🔌 [backend/routes/sensors.js](backend/routes/sensors.js) - Sensor endpoints (Person 2 completes)
-
-### **Documentation**
-- 📋 [backend/DATABASE_SCHEMA.sql](backend/DATABASE_SCHEMA.sql) - Complete DB schema (15 tables)
-- 📖 [backend/API_ENDPOINTS.md](backend/API_ENDPOINTS.md) - All 22 endpoints with examples
-- 📖 [backend/README.md](backend/README.md) - Backend setup guide
-- 📖 [backend/TDD_WORKFLOW.md](backend/TDD_WORKFLOW.md) - Development methodology + timeline
-
-### **Frontend Setup Files**
-- 📄 [frontend/package.json](frontend/package.json) - React + Vite dependencies
-- ⚙️ [frontend/vite.config.js](frontend/vite.config.js) - Vite build config
-- 🎨 [frontend/index.html](frontend/index.html) - HTML entry point
-
-### **Frontend Structure**
-- 📖 [frontend/FRONTEND_STRUCTURE.md](frontend/FRONTEND_STRUCTURE.md) - Component architecture + code examples
-- 📖 [frontend/README.md](frontend/README.md) - Frontend setup guide
-- 🗂️ [frontend/src/components/](frontend/src/components/) - React components (create here)
-- 🪝 [frontend/src/hooks/](frontend/src/hooks/) - Custom hooks (create here)
-- 🔌 [frontend/src/services/](frontend/src/services/) - API services (create here)
-
----
-
-## 🧪 Testing & Verification
-
-### **Run Backend Tests**
 ```bash
 cd backend
-npm run test:once    # Runs Jest test suite
+npm run test:once
 ```
-
-Shows test results: 6 tests for sensors module passing ✅
-
-### **Manual API Testing**
-```bash
-# Terminal (or use Postman app)
-curl http://localhost:5000/api/sensors
-curl http://localhost:5000/api/sensors/SENSOR_A01_DO/latest
-curl http://localhost:5000/api/zones
-```
-
-### **Check Real-time Updates**
-1. Open browser DevTools (F12)
-2. Network tab → XHR filter
-3. Should see API requests every 5 seconds
-4. SensorCard values should update in real-time
 
 ---
 
-## 🐛 Troubleshooting
+## 6. Cach Hieu Frontend Nhanh
 
-### **Backend Issues**
+Luong xu ly chinh:
+1. `frontend/src/main.jsx` render `App`.
+2. `frontend/src/App.jsx` dinh nghia routing, protected route, role route.
+3. `frontend/src/services/api.js` chua ham fetch API ve backend (`http://localhost:5000/api`).
+4. Cac trang trong `frontend/src/pages/` su dung component/hook de hien thi du lieu.
 
-**MongoDB/MySQL connection fails?**
-```bash
-# Check MySQL is running
-mysql -u root -p -e "SELECT 1;"
+File nen doc dau tien (FE):
+- `frontend/src/main.jsx`
+- `frontend/src/App.jsx`
+- `frontend/src/context/AuthContext.jsx`
+- `frontend/src/services/api.js`
+- `frontend/src/pages/DashboardPage.jsx`
 
-# Verify database exists
-mysql -u root -p -e "SHOW DATABASES;" | grep aquaculture
-```
+---
 
-**Tests failing?**
+## 7. Chay Toan He Thong (3 terminal)
+
+Terminal 1:
+
 ```bash
 cd backend
-npm run test:once      # Run with verbose output
+npm start
 ```
 
-**Port 5000 in use?**
+Terminal 2:
+
 ```bash
-lsof -i :5000          # Find process
-kill -9 <PID>          # Kill it
-npm start              # Restart
+cd frontend
+npm run dev
 ```
 
-### **Frontend Issues**
+Terminal 3 (neu can realtime/gateway):
 
-**Page blank or loading forever?**
 ```bash
-# Check console (F12 → Console tab)
-# Look for errors about API base URL
-
-# Verify backend is running:
-curl http://localhost:5000
+python gateway/main.py
 ```
 
-**Port 5173 in use?**
+Sau do mo trinh duyet: `http://localhost:5173`
+
+---
+
+## 8. Troubleshooting Nhanh
+
+### Loi ket noi DB
+- Kiem tra MySQL dang chay
+- Kiem tra dung ten DB trong `.env` (`DB_NAME=newdb`)
+- Kiem tra username/password MySQL
+
+### Frontend khong goi duoc API
+- Dam bao backend dang chay cong 5000
+- Kiem tra file `frontend/src/services/api.js` dang dung dung host (`http://localhost:5000/api`)
+
+### Port bi trung
+
 ```bash
+# Doi cong frontend
+cd frontend
 npm run dev -- --port 5174
 ```
 
 ---
 
-## 📚 Key Resources
+## 9. Tai Lieu Bo Sung Trong Repo
 
-### **Documentation**
-- [TDD Workflow Guide](backend/TDD_WORKFLOW.md) - How to test-first code
-- [API Specification](backend/API_ENDPOINTS.md) - Exact endpoint formats
-- [Database Schema](backend/DATABASE_SCHEMA.sql) - Table structures & relationships
-
-### **Getting Started**
-- [Backend Setup](backend/README.md) - Node.js + MySQL quick start
-- [Frontend Setup](frontend/README.md) - React + Vite quick start
-- [Component Guide](frontend/FRONTEND_STRUCTURE.md) - React component examples
-
-### **External Links**
-- [Node.js Docs](https://nodejs.org/docs/)
-- [Express Guide](https://expressjs.com)
-- [React Docs](https://react.dev)
-- [MySQL Manual](https://dev.mysql.com/doc)
-- [Recharts Docs](https://recharts.org)
+- Backend guide: [backend/README.md](backend/README.md)
+- Frontend guide: [frontend/README.md](frontend/README.md)
+- Frontend structure: [frontend/FRONTEND_STRUCTURE.md](frontend/FRONTEND_STRUCTURE.md)
+- Huong dan chay nhanh cu: [HOW TO RUN.txt](HOW TO RUN.txt)
 
 ---
 
-## 👥 Contact & Support
+## 10. Note Quan Trong
 
-**Tech Lead:** [Your Name]  
-**Backend Contact:** Person 2-3  
-**Frontend Contact:** Person 4  
-**Database Contact:** Person 1  
-**QA Contact:** Person 5  
-
----
-
-## 📊 Project Status
-
-| Component | Status | Progress |
-|-----------|--------|----------|
-| 📋 Requirements | ✅ Done | 100% |
-| 📐 Design | ✅ Done | 100% |
-| 🎨 Frontend Architecture | ✅ Done | Components designed |
-| 👨‍💻 Implementation | 🔄 In Progress | Day 1-3 of sprint |
-| ✔️ Testing | 🔄 In Progress | Team testing |
-| 🎬 Demo | ⏳ Pending | Due 23 Mar |
-
----
-
-*Last updated: March 2026*
+- Root README nay la tai lieu tong quan cho ca FE + BE + Gateway.
+- Tai lieu trong `backend/` va `frontend/` nen duoc xem la chi tiet module.
+- Neu doi ten database/schema, hay cap nhat dong bo:
+	- file SQL
+	- `backend/.env`
+	- huong dan trong README
