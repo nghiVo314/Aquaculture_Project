@@ -123,8 +123,6 @@ export const getUsers = async () => {
     return res.json();
 };
 
-export const getManagers = () => request('/users/managers');
-
 export const updateUserAreas = async (userId, khuvuc_ids) => {
     const token = localStorage.getItem('aq_token');
     const res = await fetch(`http://127.0.0.1:5000/api/users/${userId}/areas`, {
@@ -243,3 +241,21 @@ export const updateUserRole = async (userId, ma_role) => {
 export const getReportSensors = (days = 7) =>
     request(`/ponds/sensor-report?days=${days}`);
 
+// Xóa người dùng
+
+export const deleteUserByAdmin = async (userId, ly_do_xoa) => {
+    const token = localStorage.getItem('aq_token');
+    const res = await fetch(`http://127.0.0.1:5000/api/users/${userId}`, {
+        method: 'DELETE',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ ly_do_xoa })
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || err.error || 'Lỗi xóa người dùng');
+    }
+    return res.json();
+};

@@ -1,6 +1,3 @@
-0. npm install   - tải gói npm về
-0.1 npm install react-csv    nếu ch có
-
 run in 3 separate terminal:
 1. cd backend sau đó chạy npx nodemon server.js
 2. py gateway/main.py
