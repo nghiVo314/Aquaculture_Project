@@ -1,6 +1,25 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../services/db');
+const { requireAuth } = require('../middlewares/rbac');
+
+// Lấy danh sách user có role manager để gán quản lý khu vực
+router.get('/managers', requireAuth, async (req, res) => {
+    try {
+        const [managers] = await db.execute(
+            `SELECT DISTINCT u.ma_nguoi_dung as ID, u.ten_dang_nhap as TenDangNhap
+             FROM nguoi_dung u
+             JOIN nguoi_dung_role ur ON u.ma_nguoi_dung = ur.ma_nguoi_dung
+             JOIN role r ON ur.ma_role = r.ma_role
+               WHERE LOWER(r.role_name) IN ('manager', 'quan ly', 'quản lý')
+             ORDER BY u.ten_dang_nhap ASC`
+        );
+
+        res.json(managers);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
 
 // 1. Lấy tất cả users (Cập nhật query theo DB mới)
 router.get('/', async (req, res) => {

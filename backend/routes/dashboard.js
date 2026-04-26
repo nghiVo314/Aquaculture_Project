@@ -49,15 +49,19 @@ router.get('/summary', requireAuth, async (req, res) => {
             SELECT 
                 kv.ma_khu_vuc as KhuVuc_ID, 
                 kv.loai_thuy_san as LoaiHaiSan,
+                kv.ma_nguoi_dung_quan_ly as managerId,
+                nd.ten_dang_nhap as manager,
+                nd.ten_dang_nhap as nguoiQuanLy,
                 COUNT(DISTINCT an.ma_ao_nuoi) as so_ao,
                 SUM(an.dien_tich) as tong_dien_tich
             FROM khu_vuc kv
+            LEFT JOIN nguoi_dung nd ON nd.ma_nguoi_dung = kv.ma_nguoi_dung_quan_ly
             LEFT JOIN ao_nuoi an ON kv.ma_khu_vuc = an.ma_khu_vuc
         `;
         if (!isAdmin) {
             zoneQuery += ` WHERE kv.ma_nguoi_dung_quan_ly = ?`;
         }
-        zoneQuery += ` GROUP BY kv.ma_khu_vuc, kv.loai_thuy_san`;
+        zoneQuery += ` GROUP BY kv.ma_khu_vuc, kv.loai_thuy_san, kv.ma_nguoi_dung_quan_ly, nd.ten_dang_nhap`;
         const [zonesData] = await db.execute(zoneQuery, queryParams);
 
         // BƯỚC 2.2: Lấy danh sách Ao Nuôi

@@ -123,6 +123,8 @@ export const getUsers = async () => {
     return res.json();
 };
 
+export const getManagers = () => request('/users/managers');
+
 export const updateUserAreas = async (userId, khuvuc_ids) => {
     const token = localStorage.getItem('aq_token');
     const res = await fetch(`http://127.0.0.1:5000/api/users/${userId}/areas`, {
