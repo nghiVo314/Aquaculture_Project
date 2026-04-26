@@ -17,21 +17,14 @@ router.get('/', requireAuth, async (req, res) => {
 
         // 3. Khởi tạo câu truy vấn cơ bản
         let query = `
-            SELECT 
-                kv.ma_khu_vuc as ID,
-                kv.loai_thuy_san as LoaiHaiSan,
-                kv.ma_nguoi_dung_quan_ly,
-                kv.ma_nguoi_dung_quan_ly as managerId,
-                nd.ten_dang_nhap as manager,
-                nd.ten_dang_nhap as nguoiQuanLy
-            FROM khu_vuc kv
-            LEFT JOIN nguoi_dung nd ON nd.ma_nguoi_dung = kv.ma_nguoi_dung_quan_ly
+            SELECT ma_khu_vuc as ID, loai_thuy_san as LoaiHaiSan, ma_nguoi_dung_quan_ly 
+            FROM khu_vuc
         `;
         let queryParams = [];
 
         // 4. Nếu KHÔNG phải admin, thêm điều kiện WHERE để chỉ lấy khu vực do user này quản lý
         if (!isAdmin) {
-            query += ` WHERE kv.ma_nguoi_dung_quan_ly = ?`;
+            query += ` WHERE ma_nguoi_dung_quan_ly = ?`;
             queryParams.push(userId);
         }
 

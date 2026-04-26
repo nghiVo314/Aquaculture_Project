@@ -1,12 +1,21 @@
 import React, { useEffect, useState } from 'react';
-import { getUsers, getZones, updateUserAreas, createUser, updateUserRole } from '../services/api';
+import { getUsers, getZones, updateUserAreas, createUser, updateUserRole, deleteUserByAdmin } from '../services/api';
 
 const UserManagementPage = () => {
   const [users, setUsers] = useState([]);
   const [zones, setZones] = useState([]);
   const [showAddForm, setShowAddForm] = useState(false);
   const [newUser, setNewUser] = useState({ ten_dang_nhap: '', mat_khau: '', ma_role: 'worker' });
-
+  const [showDeleteForm, setShowDeleteForm] = useState(false);
+  const [deleteForm, setDeleteForm] = useState({ userId: '', reason: '' });
+  const currentUser = (() => {
+    try {
+      return JSON.parse(localStorage.getItem('aq_user') || 'null');
+    } catch {
+      return null;
+    }
+  })();
+  const currentUserId = currentUser?.id || currentUser?.ID;
   // Giả lập check quyền admin từ Token (Bạn có thể lấy từ Context/Redux)
   const isAdmin = true; 
 
@@ -59,14 +68,71 @@ const UserManagementPage = () => {
     } catch (err) { alert(err.message); }
   };
 
+  const handleSubmitDeleteUser = async (e) => {
+    e.preventDefault();
+    if (!isAdmin) return;
+
+    if (!deleteForm.userId) {
+      alert('Vui lòng chọn nhân sự cần xóa.');
+      return;
+    }
+
+    if (!deleteForm.reason.trim()) {
+      alert('Vui lòng nhập lý do xóa.');
+      return;
+    }
+
+    const selectedUser = users.find(u => String(u.ID) === String(deleteForm.userId));
+    const userName = selectedUser?.TenDangNhap || deleteForm.userId;
+
+    const ok = window.confirm(`Bạn chắc chắn muốn xóa user "${userName}"?`);
+    if (!ok) return;
+
+    try {
+      await deleteUserByAdmin(deleteForm.userId, deleteForm.reason.trim());
+      alert('Xóa người dùng thành công!');
+      setDeleteForm({ userId: '', reason: '' });
+      setShowDeleteForm(false);
+      fetchData();
+    } catch (err) {
+      alert(err.message || 'Xóa người dùng thất bại');
+    }
+  };
+
   return (
     <div className="panel">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h2>Quản lý Nhân sự & Phân vùng</h2>
         {isAdmin && (
-          <button className="btn-primary" onClick={() => setShowAddForm(!showAddForm)}>
-            {showAddForm ? 'Hủy' : '+ Thêm Nhân sự'}
-          </button>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <button
+              className="btn-primary"
+              onClick={() => {
+                setShowAddForm(!showAddForm);
+                if (!showAddForm) setShowDeleteForm(false);
+              }}
+            >
+              {showAddForm ? 'Hủy' : '+ Thêm Nhân sự'}
+            </button>
+
+            <button
+              onClick={() => {
+                setShowDeleteForm(!showDeleteForm);
+                if (!showDeleteForm) setShowAddForm(false);
+              }}
+              style={{
+                background: '#dc3545',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '6px',
+                padding: '8px 14px',
+                cursor: 'pointer',
+                fontWeight: 600
+              }}
+            >
+              {showDeleteForm ? 'Hủy xóa' : 'Xóa Nhân sự'}
+            </button>
+          </div>
         )}
       </div>
 
@@ -88,6 +154,64 @@ const UserManagementPage = () => {
         </form>
       )}
 
+      {showDeleteForm && (
+        <form
+          onSubmit={handleSubmitDeleteUser}
+          style={{
+            background: '#fff5f5',
+            border: '1px solid #f5c2c7',
+            padding: '15px',
+            marginBottom: '20px',
+            borderRadius: '8px'
+          }}
+        >
+          <h3 style={{ marginTop: 0, color: '#842029' }}>Xóa Tài khoản Nhân sự</h3>
+
+          <div style={{ display: 'grid', gap: '10px' }}>
+            <select
+              required
+              value={deleteForm.userId}
+              onChange={(e) => setDeleteForm({ ...deleteForm, userId: e.target.value })}
+            >
+              <option value="">-- Chọn nhân sự cần xóa --</option>
+              {Array.isArray(users) &&
+                users
+                  .filter(u => u.TrangThai === 1)
+                  .map(u => (
+                    <option key={u.ID} value={u.ID}>
+                      {u.TenDangNhap} ({u.RoleName || u.Role_ID || 'unknown'})
+                    </option>
+                  ))}
+            </select>
+
+            <textarea
+              required
+              rows={3}
+              placeholder="Nhập lý do xóa..."
+              value={deleteForm.reason}
+              onChange={(e) => setDeleteForm({ ...deleteForm, reason: e.target.value })}
+            />
+
+            <div>
+              <button
+                type="submit"
+                style={{
+                  background: '#dc3545',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '6px',
+                  padding: '8px 14px',
+                  cursor: 'pointer',
+                  fontWeight: 600
+                }}
+              >
+                Xác nhận xóa
+              </button>
+            </div>
+          </div>
+        </form>
+      )}
+
       <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '20px' }}>
         <thead>
           <tr style={{ background: '#f4f4f4', textAlign: 'left' }}>
@@ -105,7 +229,7 @@ const UserManagementPage = () => {
               <tr key={user.ID} style={{ borderBottom: '1px solid #ddd' }}>
                 <td style={{ padding: '12px', fontWeight: 'bold' }}>{user.TenDangNhap}</td>
                 <td style={{ padding: '12px' }}>
-                  {isAdmin ? (
+                  {isAdmin && (String(user.ID) !== String(currentUserId)) ? (
                     <select 
                       value={user.Role_ID || 'worker'} 
                       onChange={(e) => handleChangeRole(user.ID, e.target.value)}

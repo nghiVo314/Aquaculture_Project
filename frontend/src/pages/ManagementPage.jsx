@@ -9,7 +9,6 @@ import {
   deleteStation,
   deleteZone,
   getDevices,
-  getManagers,
   getPonds,
   getStations,
   getZones
@@ -17,28 +16,26 @@ import {
 import { useAuth } from '../context/AuthContext';
 
 const ManagementPage = () => {
-  const { hasPermission } = useAuth();
+  const { hasPermission } = useAuth(); // Dùng hàm kiểm tra quyền thay vì check Role tĩnh
 
   const [zones, setZones] = useState([]);
   const [ponds, setPonds] = useState([]);
   const [stations, setStations] = useState([]);
   const [devices, setDevices] = useState([]);
-  const [managers, setManagers] = useState([]);
   const [error, setError] = useState('');
 
-  const [zoneForm, setZoneForm] = useState({ ma_khu_vuc: '', loai_thuy_san: '', ma_nguoi_dung_quan_ly: '' });
+  const [zoneForm, setZoneForm] = useState({ ma_khu_vuc: '', loai_thuy_san: '' });
   const [pondForm, setPondForm] = useState({ ma_ao_nuoi: '', ma_khu_vuc: '', dien_tich: '' });
   const [stationForm, setStationForm] = useState({ ma_tram: '', ma_ao_nuoi: '', trang_thai_cloud: 'online' });
   const [deviceForm, setDeviceForm] = useState({ ma_thiet_bi: '', ma_tram: '', nhom_thiet_bi: 'sensor', loai_thiet_bi: '' });
 
   const loadAll = async () => {
     try {
-      const [z, p, s, d, m] = await Promise.all([getZones(), getPonds(), getStations(), getDevices(), getManagers()]);
+      const [z, p, s, d] = await Promise.all([getZones(), getPonds(), getStations(), getDevices()]);
       setZones(z);
       setPonds(p);
       setStations(s);
       setDevices(d);
-      setManagers(m);
       setError('');
     } catch (err) {
       setError(err.message);
@@ -70,90 +67,33 @@ const ManagementPage = () => {
       {error && <p className="form-error">{error}</p>}
 
       <div className="grid-two">
+        {/* KHU VỰC */}
         <article className="card">
           <h3>Khu vực</h3>
           {hasPermission('zone:create') && (
             <form
-              className="space-y-5"
+              className="mini-form"
               onSubmit={(event) => {
                 event.preventDefault();
                 submitAction(
                   () => addZone({ ...zoneForm }),
-                  () => setZoneForm({ ma_khu_vuc: '', loai_thuy_san: '', ma_nguoi_dung_quan_ly: '' })
+                  () => setZoneForm({ ma_khu_vuc: '', loai_thuy_san: '' })
                 );
               }}
             >
-              <div>
-                <label className="mb-2 block text-sm font-medium text-slate-700" htmlFor="ma_khu_vuc">
-                  Mã khu vực
-                </label>
-                <input
-                  id="ma_khu_vuc"
-                  name="ma_khu_vuc"
-                  type="text"
-                  placeholder="VD: KV-001"
-                  value={zoneForm.ma_khu_vuc}
-                  onChange={(event) => setZoneForm((prev) => ({ ...prev, ma_khu_vuc: event.target.value }))}
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-cyan-600"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="mb-2 block text-sm font-medium text-slate-700" htmlFor="loai_thuy_san">
-                  Loại thủy sản
-                </label>
-                <select
-                  id="loai_thuy_san"
-                  name="loai_thuy_san"
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-cyan-600"
-                  value={zoneForm.loai_thuy_san}
-                  onChange={(event) => setZoneForm((prev) => ({ ...prev, loai_thuy_san: event.target.value }))}
-                  required
-                >
-                  <option value="" disabled>
-                    Chọn loại thủy sản
-                  </option>
-                  <option value="tom_the">Tôm thẻ chân trắng</option>
-                  <option value="tom_su">Tôm sú</option>
-                  <option value="ca_tra">Cá tra</option>
-                  <option value="ca_dieu_hong">Cá diêu hồng</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="mb-2 block text-sm font-medium text-slate-700" htmlFor="ma_nguoi_dung_quan_ly">
-                  Người quản lý
-                </label>
-                <select
-                  id="ma_nguoi_dung_quan_ly"
-                  name="ma_nguoi_dung_quan_ly"
-                  value={zoneForm.ma_nguoi_dung_quan_ly}
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-cyan-600"
-                  onChange={(event) =>
-                    setZoneForm((prev) => ({ ...prev, ma_nguoi_dung_quan_ly: event.target.value }))
-                  }
-                  required
-                >
-                  <option value="" disabled>
-                    Chọn người quản lý
-                  </option>
-                  {managers.map((manager) => (
-                    <option key={manager.ID} value={manager.ID}>
-                      {manager.TenDangNhap} ({manager.ID})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="pt-2">
-                <button
-                  type="submit"
-                  className="rounded-lg bg-cyan-700 px-5 py-2.5 text-sm font-semibold text-white hover:bg-cyan-800"
-                >
-                  Lưu Khu Vực
-                </button>
-              </div>
+              <input
+                placeholder="Mã khu vực"
+                value={zoneForm.ma_khu_vuc}
+                onChange={(event) => setZoneForm((prev) => ({ ...prev, ma_khu_vuc: event.target.value }))}
+                required
+              />
+              <input
+                placeholder="Loại thủy sản"
+                value={zoneForm.loai_thuy_san}
+                onChange={(event) => setZoneForm((prev) => ({ ...prev, loai_thuy_san: event.target.value }))}
+                required
+              />
+              <button type="submit">Thêm khu</button>
             </form>
           )}
           <ul className="item-list">
@@ -172,6 +112,7 @@ const ManagementPage = () => {
           </ul>
         </article>
 
+        {/* AO NUÔI */}
         <article className="card">
           <h3>Ao nuôi</h3>
           {hasPermission('pond:create') && (
@@ -223,6 +164,7 @@ const ManagementPage = () => {
           </ul>
         </article>
 
+        {/* TRẠM BIÊN */}
         <article className="card">
           <h3>Trạm biên</h3>
           {hasPermission('station:create') && (
@@ -274,6 +216,7 @@ const ManagementPage = () => {
           </ul>
         </article>
 
+        {/* THIẾT BỊ */}
         <article className="card">
           <h3>Thiết bị</h3>
           {hasPermission('device:create') && (

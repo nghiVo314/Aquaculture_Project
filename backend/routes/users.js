@@ -3,23 +3,9 @@ const router = express.Router();
 const db = require('../services/db');
 const { requireAuth } = require('../middlewares/rbac');
 
-// Lấy danh sách user có role manager để gán quản lý khu vực
-router.get('/managers', requireAuth, async (req, res) => {
-    try {
-        const [managers] = await db.execute(
-            `SELECT DISTINCT u.ma_nguoi_dung as ID, u.ten_dang_nhap as TenDangNhap
-             FROM nguoi_dung u
-             JOIN nguoi_dung_role ur ON u.ma_nguoi_dung = ur.ma_nguoi_dung
-             JOIN role r ON ur.ma_role = r.ma_role
-               WHERE LOWER(r.role_name) IN ('manager', 'quan ly', 'quản lý')
-             ORDER BY u.ten_dang_nhap ASC`
-        );
-
-        res.json(managers);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
+function isAdmin(req) {
+    return Array.isArray(req.user?.roles) && req.user.roles.includes('admin');
+}
 
 // 1. Lấy tất cả users (Cập nhật query theo DB mới)
 router.get('/', async (req, res) => {
@@ -54,15 +40,13 @@ router.post('/', async (req, res) => {
     const connection = await db.getConnection();
     try {
         await connection.beginTransaction();
-        const ma_nguoi_dung = `USR_${Date.now()}`; // Có thể dùng UUID
+        const ma_nguoi_dung = `USR_${Date.now()}`;
         
-        // Thêm vào bảng nguoi_dung
         await connection.execute(
             `INSERT INTO nguoi_dung (ma_nguoi_dung, ten_dang_nhap, mat_khau) VALUES (?, ?, ?)`,
-            [ma_nguoi_dung, ten_dang_nhap, mat_khau] // Lưu ý: Nên hash password bằng bcrypt ở thực tế
+            [ma_nguoi_dung, ten_dang_nhap, mat_khau]
         );
 
-        // Gán role vào bảng nguoi_dung_role
         if (ma_role) {
             await connection.execute(
                 `INSERT INTO nguoi_dung_role (ma_nguoi_dung, ma_role) VALUES (?, ?)`,
@@ -81,11 +65,18 @@ router.post('/', async (req, res) => {
 });
 
 // 3. Cập nhật Role cho User
-router.put('/:id/role', async (req, res) => {
+router.put('/:id/role', requireAuth, async (req, res) => {
     const { id } = req.params;
     const { ma_role } = req.body;
     try {
-        // Cập nhật đơn giản: Xóa role cũ và thêm role mới (giả định 1 user 1 role chính)
+        if (!isAdmin(req)) {
+            return res.status(403).json({ error: 'Bạn không có quyền cập nhật vai trò' });
+        }
+
+        if (String(req.user.id) === String(id)) {
+            return res.status(400).json({ error: 'Không thể tự thay đổi vai trò của chính bạn' });
+        }
+
         await db.execute(`DELETE FROM nguoi_dung_role WHERE ma_nguoi_dung = ?`, [id]);
         await db.execute(`INSERT INTO nguoi_dung_role (ma_nguoi_dung, ma_role) VALUES (?, ?)`, [id, ma_role]);
         res.json({ status: 'success', message: 'Cập nhật quyền thành công' });
@@ -103,10 +94,11 @@ router.put('/:user_id/areas', async (req, res) => {
     try {
         await connection.beginTransaction();
 
-        // Remove this user as manager from old zones
-        await connection.execute(`UPDATE khu_vuc SET ma_nguoi_dung_quan_ly = NULL WHERE ma_nguoi_dung_quan_ly = ?`, [userId]);
+        await connection.execute(
+            `UPDATE khu_vuc SET ma_nguoi_dung_quan_ly = NULL WHERE ma_nguoi_dung_quan_ly = ?`,
+            [userId]
+        );
 
-        // Assign user as manager to new zones
         for (let kv_id of khuvuc_ids) {
             await connection.execute(
                 `UPDATE khu_vuc SET ma_nguoi_dung_quan_ly = ? WHERE ma_khu_vuc = ?`,
@@ -137,6 +129,76 @@ router.get('/:user_id/my-ponds', async (req, res) => {
         res.json(ponds);
     } catch (error) {
         res.status(500).json({ error: error.message });
+    }
+});
+
+// 6. Xóa cứng user (hard delete)
+router.delete('/:id', requireAuth, async (req, res) => {
+    const { id } = req.params;
+    const { ly_do_xoa } = req.body || {};
+    const connection = await db.getConnection();
+
+    try {
+        if (!isAdmin(req)) {
+            return res.status(403).json({ status: 'error', message: 'Bạn không có quyền xóa người dùng' });
+        }
+
+        if (String(req.user.id) === String(id)) {
+            return res.status(400).json({ status: 'error', message: 'Không thể tự xóa tài khoản của chính bạn' });
+        }
+
+        if (!ly_do_xoa || !String(ly_do_xoa).trim()) {
+            return res.status(400).json({ status: 'error', message: 'Vui lòng nhập lý do xóa' });
+        }
+
+        await connection.beginTransaction();
+
+        const [users] = await connection.execute(
+            'SELECT ma_nguoi_dung, ten_dang_nhap FROM nguoi_dung WHERE ma_nguoi_dung = ?',
+            [id]
+        );
+        if (users.length === 0) {
+            await connection.rollback();
+            return res.status(404).json({ status: 'error', message: 'Không tìm thấy người dùng' });
+        }
+
+        // Bắt buộc user phải bỏ liên kết khu vực trước khi xóa
+        const [zones] = await connection.execute(
+            'SELECT ma_khu_vuc FROM khu_vuc WHERE ma_nguoi_dung_quan_ly = ?',
+            [id]
+        );
+        if (zones.length > 0) {
+            await connection.rollback();
+            const zoneList = zones.map(z => z.ma_khu_vuc).join(', ');
+            return res.status(409).json({
+                status: 'error',
+                message: `Không thể xóa. Người dùng vẫn đang quản lý khu vực: ${zoneList}. Hãy bỏ liên kết khu vực trước.`
+            });
+        }
+
+        const targetUser = users[0];
+
+        // Ghi log trước khi xóa để giữ thông tin audit
+        const moTa = `Admin ${req.user.username} xóa user ${targetUser.ten_dang_nhap} (${id}). Lý do: ${String(ly_do_xoa).trim()}`;
+        await connection.execute(
+            `INSERT INTO log_he_thong (ma_nguoi_dung_tao, log_type, source_type, acknowledged, mo_ta)
+             VALUES (?, 'DELETE_USER', 'MANUAL', 1, ?)`,
+            [req.user.id, moTa]
+        );
+
+        // Hard delete
+        await connection.execute(
+            'DELETE FROM nguoi_dung WHERE ma_nguoi_dung = ?',
+            [id]
+        );
+
+        await connection.commit();
+        return res.json({ status: 'success', message: 'Đã xóa người dùng khỏi hệ thống' });
+    } catch (error) {
+        await connection.rollback();
+        return res.status(500).json({ status: 'error', message: error.message });
+    } finally {
+        connection.release();
     }
 });
 

@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
-  getDashboardSummary, addZone, updateZone, deleteZone, getManagers 
+  getDashboardSummary, addZone, updateZone, deleteZone 
 } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { 
@@ -32,98 +32,19 @@ const KpiCard = ({ title, value, icon: Icon, colorClass, bgColorClass, tooltip }
 );
 
 // ==========================================
-// 1B. COMPONENT: SEARCHABLE MANAGER SELECT
-// ==========================================
-const SearchableManagerSelect = ({ managers, value, onChange }) => {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [isFocused, setIsFocused] = useState(false);
-  const dropdownRef = React.useRef(null);
-
-  useEffect(() => {
-    const selected = managers.find((m) => m.ID === value);
-    setSearchTerm(selected ? selected.TenDangNhap : '');
-  }, [value, managers]);
-
-  const handleSelect = (managerId) => {
-    const selected = managers.find((m) => m.ID === managerId);
-    onChange(managerId);
-    setSearchTerm(selected ? selected.TenDangNhap : '');
-    setIsFocused(false);
-  };
-
-  // Close dropdown when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
-        setIsFocused(false);
-      }
-    };
-    if (isFocused) {
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
-    }
-  }, [isFocused]);
-
-  const filteredManagers = managers.filter((m) => {
-    const keyword = searchTerm.trim().toLowerCase();
-    if (!keyword) return true;
-    return (
-      m.TenDangNhap.toLowerCase().includes(keyword) ||
-      m.ID.toLowerCase().includes(keyword)
-    );
-  });
-
-  const showDropdown = isFocused && filteredManagers.length > 0;
-
-  return (
-    <div className="relative w-full" ref={dropdownRef}>
-      <input
-        type="text"
-        placeholder="Tìm kiếm tên hoặc mã..."
-        value={searchTerm}
-        onFocus={() => setIsFocused(true)}
-        onChange={(e) => {
-          setSearchTerm(e.target.value);
-          onChange('');
-        }}
-        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-      />
-
-      {showDropdown && (
-        <div className="absolute top-full left-0 right-0 z-[999] mt-1 bg-white border border-gray-300 rounded-lg shadow-lg overflow-y-auto min-h-[120px] max-h-[200px]">
-          {filteredManagers.map((manager) => (
-            <button
-              key={manager.ID}
-              type="button"
-              onClick={() => handleSelect(manager.ID)}
-              className={`w-full h-10 px-4 text-left hover:bg-blue-50 transition-colors ${
-                value === manager.ID ? 'bg-blue-100 font-semibold text-blue-700' : 'text-gray-700'
-              }`}
-            >
-              {manager.TenDangNhap} ({manager.ID})
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
-
-// ==========================================
 // 2. COMPONENT: MODAL FORM (THÊM/SỬA)
 // ==========================================
-const ZoneModal = ({ isOpen, onClose, onSubmit, initialData, isLoading, managers }) => {
-  const [formData, setFormData] = useState({ ma_khu_vuc: '', loai_thuy_san: '', ma_nguoi_dung_quan_ly: '' });
+const ZoneModal = ({ isOpen, onClose, onSubmit, initialData, isLoading }) => {
+  const [formData, setFormData] = useState({ ma_khu_vuc: '', loai_thuy_san: '' });
 
   useEffect(() => {
     if (initialData) {
       setFormData({ 
         ma_khu_vuc: initialData.KhuVuc_ID || '', 
-        loai_thuy_san: initialData.LoaiHaiSan || '',
-        ma_nguoi_dung_quan_ly: initialData.Manager_ID || ''
+        loai_thuy_san: initialData.LoaiHaiSan || '' 
       });
     } else {
-      setFormData({ ma_khu_vuc: '', loai_thuy_san: '', ma_nguoi_dung_quan_ly: '' });
+      setFormData({ ma_khu_vuc: '', loai_thuy_san: '' });
     }
   }, [initialData, isOpen]);
 
@@ -131,16 +52,12 @@ const ZoneModal = ({ isOpen, onClose, onSubmit, initialData, isLoading, managers
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (!formData.ma_nguoi_dung_quan_ly) {
-      alert('Vui lòng chọn người quản lý');
-      return;
-    }
     onSubmit(formData);
   };
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center backdrop-blur-sm">
-      <div className="bg-white rounded-xl shadow-lg w-[90%] max-w-[520px] max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in duration-200">
+      <div className="bg-white rounded-xl shadow-lg w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
         <div className="flex justify-between items-center p-5 border-b border-gray-100">
           <h3 className="text-lg font-semibold text-gray-800">
             {initialData ? 'Cập nhật Khu vực' : 'Thêm Khu vực mới'}
@@ -171,14 +88,6 @@ const ZoneModal = ({ isOpen, onClose, onSubmit, initialData, isLoading, managers
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
               value={formData.loai_thuy_san}
               onChange={(e) => setFormData({...formData, loai_thuy_san: e.target.value})}
-            />
-          </div>
-          <div className="mb-6">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Người quản lý *</label>
-            <SearchableManagerSelect
-              managers={managers}
-              value={formData.ma_nguoi_dung_quan_ly}
-              onChange={(managerId) => setFormData({ ...formData, ma_nguoi_dung_quan_ly: managerId })}
             />
           </div>
           <div className="flex justify-end space-x-3">
@@ -212,7 +121,6 @@ const DashboardPage = () => {
   
   // State quản lý dữ liệu
   const [data, setData] = useState({ zones: [] });
-  const [managers, setManagers] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   
@@ -235,9 +143,8 @@ const DashboardPage = () => {
     setIsLoading(true);
     setError('');
     try {
-      const [dashboardRes, managersRes] = await Promise.all([getDashboardSummary(), getManagers()]);
-      setData(dashboardRes);
-      setManagers(managersRes);
+      const res = await getDashboardSummary();
+      setData(res);
     } catch (err) {
       setError(err.message || 'Có lỗi xảy ra khi tải dữ liệu');
     } finally {
@@ -267,14 +174,14 @@ const DashboardPage = () => {
         const payload = { 
           ma_khu_vuc: formData.ma_khu_vuc, 
           loai_thuy_san: formData.loai_thuy_san, 
-          ma_nguoi_dung_quan_ly: formData.ma_nguoi_dung_quan_ly
+          ma_nguoi_dung_quan_ly: user?.id 
         };
         await addZone(payload);
         showToast('Thêm khu vực thành công!');
       } else {
         const payload = { 
           loai_thuy_san: formData.loai_thuy_san, 
-          ma_nguoi_dung_quan_ly: formData.ma_nguoi_dung_quan_ly
+          ma_nguoi_dung_quan_ly: user?.id 
         };
         await updateZone(formData.ma_khu_vuc, payload);
         showToast('Cập nhật khu vực thành công!');
@@ -468,7 +375,6 @@ const DashboardPage = () => {
                 <th className="p-4 font-semibold cursor-pointer hover:bg-gray-100" onClick={() => handleSort('LoaiHaiSan')}>
                   <div className="flex items-center">Loại Thủy Sản {sortConfig.key === 'LoaiHaiSan' && (sortConfig.direction === 'asc' ? <ChevronUp size={16}/> : <ChevronDown size={16}/>)}</div>
                 </th>
-                <th className="p-4 font-semibold">Người Quản Lý</th>
                 <th className="p-4 font-semibold cursor-pointer hover:bg-gray-100" onClick={() => handleSort('so_ao')}>
                   <div className="flex items-center">Số Ao {sortConfig.key === 'so_ao' && (sortConfig.direction === 'asc' ? <ChevronUp size={16}/> : <ChevronDown size={16}/>)}</div>
                 </th>
@@ -482,7 +388,7 @@ const DashboardPage = () => {
             <tbody>
               {filteredAndSortedZones.length === 0 ? (
                 <tr>
-                  <td colSpan="6" className="p-8 text-center text-gray-500">
+                  <td colSpan="5" className="p-8 text-center text-gray-500">
                     <div className="flex flex-col items-center">
                       <Fish size={48} className="text-gray-300 mb-3" />
                       <p>Không tìm thấy dữ liệu khu vực nào.</p>
@@ -500,13 +406,6 @@ const DashboardPage = () => {
                       {zone.KhuVuc_ID}
                     </td>
                     <td className="p-4 text-gray-700">{zone.LoaiHaiSan}</td>
-                    <td className="p-4 text-gray-700">
-                      {zone.manager || zone.nguoiQuanLy ? (
-                        zone.manager || zone.nguoiQuanLy
-                      ) : (
-                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-500">— Chưa phân công</span>
-                      )}
-                    </td>
                     <td className="p-4 text-gray-700">{zone.so_ao || 0}</td>
                     <td className="p-4 text-gray-700">{(zone.tong_dien_tich || 0).toLocaleString()}</td>
                     <td className="p-4 text-right">
@@ -553,7 +452,6 @@ const DashboardPage = () => {
         onSubmit={handleSubmitZone}
         initialData={modalConfig.data}
         isLoading={actionLoading}
-        managers={managers}
       />
     </div>
   );
