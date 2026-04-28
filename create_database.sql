@@ -128,7 +128,7 @@ CREATE TABLE `ghi_chep_cho_an` (
 );
 
 INSERT INTO `nguoi_dung` VALUES
-('USR_ADMIN','admin','123456',1),
+('USR_ADMIN','admin','admin',1),
 ('USR_MANAGER_01','manager1','123456',1),
 ('USR_QL01','quanly1','123456',1),
 ('USR_WORKER_01','worker1','123456',1),

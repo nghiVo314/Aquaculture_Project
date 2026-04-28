@@ -15,7 +15,10 @@ import {
   deleteSchedule, 
   getFeedingFormulas, 
   addFeedingFormula,
-  deleteFeedingFormula
+  deleteFeedingFormula,
+  getPondAlerts,
+  acknowledgeAlert,
+  suggestSchedules
 } from '../services/api';
 
 const PondDetailPage = () => {
@@ -31,6 +34,9 @@ const PondDetailPage = () => {
   const [schedules, setSchedules] = useState([]);
   const [feedingHistory, setFeedingHistory] = useState([]);
   const [formulas, setFormulas] = useState([]);
+  const [alerts, setAlerts] = useState([]);
+  const [suggestedSchedules, setSuggestedSchedules] = useState([]);
+  const [suggestLoading, setSuggestLoading] = useState(false);
 
   // States Form
   const [scheduleForm, setScheduleForm] = useState({ ma_tb_dieu_khien: '', start_time: '', end_time: '', ma_cong_thuc: '' });
@@ -72,11 +78,13 @@ const PondDetailPage = () => {
 
         // Tải lịch trình & lịch sử cho các thiết bị của ao này
         await refreshDynamicData(currentPondDevices);
+        await loadPondAlerts();
 
         // Đặt interval cập nhật dữ liệu động (Cảm biến & Lịch sử) mỗi 5s
         intervalId = setInterval(() => {
           getPondConfig(id).then(setPondConfig).catch(console.error);
           refreshDynamicData(currentPondDevices);
+          loadPondAlerts();
         }, 5000);
 
       } catch (err) {
@@ -108,6 +116,15 @@ const PondDetailPage = () => {
       setFeedingHistory(histArray.filter(h => deviceIds.includes(h.ma_tb_dieu_khien)));
     } catch (err) {
       console.error("Lỗi refresh dữ liệu động:", err);
+    }
+  };
+
+  const loadPondAlerts = async () => {
+    try {
+      const rows = await getPondAlerts(id, 'unacknowledged');
+      setAlerts(Array.isArray(rows) ? rows : []);
+    } catch (err) {
+      console.error('Lỗi tải cảnh báo ao:', err);
     }
   };
 
@@ -167,6 +184,49 @@ const PondDetailPage = () => {
     }
   };
 
+  const handleSuggestSchedule = async () => {
+    if (!scheduleForm.ma_tb_dieu_khien) {
+      alert('Vui lòng chọn thiết bị điều khiển trước khi gợi ý lịch.');
+      return;
+    }
+    setSuggestLoading(true);
+    try {
+      const response = await suggestSchedules({
+        ao_id: id,
+        ma_tb_dieu_khien: scheduleForm.ma_tb_dieu_khien
+      });
+      setSuggestedSchedules(response.suggestions || []);
+    } catch (err) {
+      alert('Không thể gợi ý lịch: ' + err.message);
+    } finally {
+      setSuggestLoading(false);
+    }
+  };
+
+  const handleApplySuggested = async (item) => {
+    try {
+      await addSchedule({
+        ma_tb_dieu_khien: item.ma_tb_dieu_khien,
+        start_time: item.start_time,
+        end_time: item.end_time,
+        ma_cong_thuc: scheduleForm.ma_cong_thuc || null
+      });
+      await refreshDynamicData(devices);
+      alert(`Đã áp dụng lịch ${item.start_time} - ${item.end_time}`);
+    } catch (err) {
+      alert('Không thể áp dụng lịch: ' + err.message);
+    }
+  };
+
+  const handleAckAlert = async (logId) => {
+    try {
+      await acknowledgeAlert(logId);
+      await loadPondAlerts();
+    } catch (err) {
+      alert('Không thể xác nhận cảnh báo: ' + err.message);
+    }
+  };
+
   const handleAddFormula = async (e) => {
     e.preventDefault();
     try {
@@ -197,7 +257,7 @@ const handleDeleteFormula = async (formulaId) => {
   if (!pondConfig) return <div>Đang tải dữ liệu ao...</div>;
 
   const controlDevices = devices.filter(d => d.loai_thiet_bi !== null);
-  const feederDevices = devices.filter(d => d.loai_thiet_bi === 'FEEDER');
+  const controllableDevices = devices.filter(d => d.loai_thiet_bi !== null);
 
   return (
     <div className="panel">
@@ -214,14 +274,27 @@ const handleDeleteFormula = async (formulaId) => {
           <div key={sensor.ma_cam_bien} className="sensor-container" style={{ border: '1px solid #eee', padding: '15px', borderRadius: '10px', background: '#fff' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
               <strong style={{ fontSize: '1.1em' }}>{sensor.LoaiCamBien}</strong>
+              <span
+                style={{
+                  fontSize: '0.85em',
+                  padding: '4px 8px',
+                  borderRadius: '999px',
+                  color: '#fff',
+                  background: Number(sensor.latest_value) > Number(sensor.max_value) || Number(sensor.latest_value) < Number(sensor.min_value) ? '#d4380d' : '#2f9e44'
+                }}
+              >
+                {Number(sensor.latest_value) > Number(sensor.max_value) || Number(sensor.latest_value) < Number(sensor.min_value) ? 'Vượt ngưỡng' : 'Ổn định'}
+              </span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
               <span style={{ fontSize: '1.5em', fontWeight: 'bold', color: '#1890ff', padding: '4px 10px', background: '#e6f7ff', borderRadius: '5px' }}>
                 {sensor.latest_value ? sensor.latest_value.toFixed(1) : '--'} 
               </span>
+              <span style={{ color: '#666', fontSize: '0.9em' }}>
+                Min {sensor.min_value} - Max {sensor.max_value}
+              </span>
             </div>
             <SensorChart deviceId={sensor.ma_cam_bien} label={sensor.LoaiCamBien} />
-            <div style={{ fontSize: '0.8em', color: '#888', marginTop: '5px' }}>
-              Ngưỡng an toàn: {sensor.min_value} - {sensor.max_value}
-            </div>
           </div>
         ))}
       </div>
@@ -298,6 +371,28 @@ const handleDeleteFormula = async (formulaId) => {
 
       {/* --- PHẦN 3: LỊCH TRÌNH VÀ CÔNG THỨC CHO ĂN --- */}
       <h3>Cài đặt Lịch trình & Công thức</h3>
+      <div className="card" style={{ padding: '20px', border: '1px solid #ccc', borderRadius: '8px', marginBottom: '20px' }}>
+        <h4>Cảnh báo chưa xử lý ({alerts.length})</h4>
+        {alerts.length === 0 ? (
+          <div style={{ color: '#777' }}>Không có cảnh báo chưa xử lý cho ao này.</div>
+        ) : (
+          <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+            {alerts.map((item) => (
+              <li key={item.ma_log} style={{ padding: '10px 0', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
+                <div>
+                  <div style={{ fontWeight: 600 }}>{item.mo_ta}</div>
+                  <div style={{ fontSize: '0.85em', color: '#777' }}>{new Date(item.thoi_gian_khoi_tao).toLocaleString('vi-VN')}</div>
+                </div>
+                {hasPermission('alerts:ack') && (
+                  <button onClick={() => handleAckAlert(item.ma_log)} style={{ border: 'none', background: '#1677ff', color: '#fff', borderRadius: '6px', padding: '8px 10px', cursor: 'pointer' }}>
+                    Đánh dấu đã xử lý
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
       <div className="grid-two" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '30px' }}>
         
         {/* Cột trái: Quản lý Công thức (Chi tiết & Xóa) */}
@@ -371,13 +466,15 @@ const handleDeleteFormula = async (formulaId) => {
           <h4>Tạo Lịch cho Ao (Sử dụng Công thức trên)</h4>
           <form onSubmit={handleAddSchedule} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <select value={scheduleForm.ma_tb_dieu_khien} onChange={e => setScheduleForm({ ...scheduleForm, ma_tb_dieu_khien: e.target.value })} required style={{ padding: '8px' }}>
-              <option value="">Chọn máy cho ăn (FEEDER)</option>
-              {feederDevices.map(d => (
-                <option key={d.ma_thiet_bi} value={d.ma_thiet_bi}>{d.ma_thiet_bi}</option>
+              <option value="">Chọn thiết bị điều khiển</option>
+              {controllableDevices.map(d => (
+                <option key={d.ma_thiet_bi} value={d.ma_thiet_bi}>
+                  {d.ma_thiet_bi} ({d.loai_thiet_bi})
+                </option>
               ))}
             </select>
-            <select value={scheduleForm.ma_cong_thuc} onChange={e => setScheduleForm({ ...scheduleForm, ma_cong_thuc: e.target.value })} required style={{ padding: '8px' }}>
-              <option value="">Chọn công thức đã tạo</option>
+            <select value={scheduleForm.ma_cong_thuc} onChange={e => setScheduleForm({ ...scheduleForm, ma_cong_thuc: e.target.value })} style={{ padding: '8px' }}>
+              <option value="">Không dùng công thức</option>
               {formulas.map(f => (
                 <option key={f.ma_cong_thuc} value={f.ma_cong_thuc}>{f.ma_cong_thuc}</option>
               ))}
@@ -389,7 +486,30 @@ const handleDeleteFormula = async (formulaId) => {
             <button type="submit" style={{ padding: '10px', background: '#4CAF50', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
               Đặt Lịch Trình
             </button>
+            <button
+              type="button"
+              onClick={handleSuggestSchedule}
+              disabled={suggestLoading}
+              style={{ padding: '10px', background: '#722ed1', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+            >
+              {suggestLoading ? 'Đang gợi ý...' : 'Gợi ý lịch tự động'}
+            </button>
           </form>
+          {suggestedSchedules.length > 0 && (
+            <div style={{ marginTop: '12px', background: '#faf5ff', border: '1px solid #ead7ff', borderRadius: '8px', padding: '10px' }}>
+              <h5 style={{ margin: '0 0 8px 0' }}>Lịch gợi ý</h5>
+              <ul style={{ margin: 0, paddingLeft: '18px' }}>
+                {suggestedSchedules.map((item) => (
+                  <li key={item.id} style={{ marginBottom: '8px' }}>
+                    <strong>{item.start_time} - {item.end_time}</strong>: {item.reason}{' '}
+                    <button onClick={() => handleApplySuggested(item)} style={{ marginLeft: '8px' }}>
+                      Áp dụng
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           
           <div style={{ marginTop: '15px' }}>
             <h5>Lịch đang chạy:</h5>

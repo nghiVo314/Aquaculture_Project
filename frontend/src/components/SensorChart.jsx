@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { getSensorHistory } from '../services/api';
 
 const SensorChart = ({ deviceId, label }) => {
   const [data, setData] = useState([]);
@@ -8,8 +9,7 @@ const SensorChart = ({ deviceId, label }) => {
     // Đảm bảo không fetch nếu chưa có deviceId
     if (!deviceId) return;
 
-    fetch(`http://127.0.0.1:5000/api/sensors/${deviceId}/history`)
-      .then(res => res.json())
+    getSensorHistory(deviceId)
       .then(json => {
         // Đảm bảo dữ liệu là mảng trước khi set state
         if (Array.isArray(json)) {

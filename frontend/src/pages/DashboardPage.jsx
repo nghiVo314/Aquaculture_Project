@@ -507,7 +507,7 @@ export default DashboardPage;
 //     const loai_thuy_san = prompt("Nhập loại thủy sản (VD: Tôm sú):");
     
 //     try {
-//       const res = await fetch('http://127.0.0.1:5000/api/zones', {
+//       const res = await fetch('http://localhost:5000/api/zones', {
 //         method: 'POST',
 //         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getToken()}` },
 //         body: JSON.stringify({ ma_khu_vuc, loai_thuy_san, ma_nguoi_dung_quan_ly: user.id })
@@ -527,7 +527,7 @@ export default DashboardPage;
 //     if (!loai_thuy_san) return;
 
 //     try {
-//       const res = await fetch(`http://127.0.0.1:5000/api/zones/${id}`, {
+//       const res = await fetch(`http://localhost:5000/api/zones/${id}`, {
 //         method: 'PUT',
 //         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getToken()}` },
 //         body: JSON.stringify({ loai_thuy_san, ma_nguoi_dung_quan_ly: user.id })
@@ -546,7 +546,7 @@ export default DashboardPage;
 //     if (!window.confirm(`Bạn có chắc muốn xóa khu vực ${id} và tất cả ao bên trong không?`)) return;
 
 //     try {
-//       const res = await fetch(`http://127.0.0.1:5000/api/zones/${id}`, {
+//       const res = await fetch(`http://localhost:5000/api/zones/${id}`, {
 //         method: 'DELETE',
 //         headers: { 'Authorization': `Bearer ${getToken()}` }
 //       });

@@ -31,9 +31,9 @@ router.post('/', requireAuth, requirePermission('pond:create'), async (req, res)
             'SELECT COUNT(*) as total FROM ao_nuoi WHERE ma_khu_vuc = ?', 
             [ma_khu_vuc]
         );
-        if (result[0].total >= 3) {
+        if (result[0].total >= 10) {
             await connection.rollback();
-            return res.status(400).json({ status: 'error', message: 'Khu vực này đã đạt tối đa 3 ao nuôi!' });
+            return res.status(400).json({ status: 'error', message: 'Khu vực này đã đạt tối đa 10 ao nuôi!' });
         }
 
         // 2. Thêm ao nuôi
@@ -98,7 +98,7 @@ router.post('/', requireAuth, requirePermission('pond:create'), async (req, res)
     } catch (error) {
         await connection.rollback();
         res.status(500).json({ error: error.message });
-        println("Lỗi khi thêm ao mới:", error);
+        console.error('Lỗi khi thêm ao mới:', error);
     } finally {
         connection.release();
     }

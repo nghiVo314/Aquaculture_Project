@@ -37,13 +37,14 @@ export const registerApi = ({ TenDangNhap, MatKhau, RoleName }) =>
         body: JSON.stringify({ TenDangNhap, MatKhau, RoleName })
     });
 
-// export const getDashboardSummary = () => request('/dashboard/summary');
+export const getDashboardSummary = () => request('/dashboard/summary');
 export const getLatestSensors = () => request('/sensors/latest');
 export const getAlerts = (status = '') => request(`/alerts${status ? `?status=${status}` : ''}`);
-export const acknowledgeAlert = (logId, userId) =>
+export const getPondAlerts = (pondId, status = 'unacknowledged') =>
+    request(`/alerts?pond_id=${encodeURIComponent(pondId)}${status ? `&status=${status}` : ''}`);
+export const acknowledgeAlert = (logId) =>
     request(`/alerts/${logId}/ack`, {
-        method: 'PUT',
-        body: JSON.stringify({ User_ID: userId })
+        method: 'PUT'
     });
 
 export const getZones = () => request('/zones');
@@ -53,6 +54,7 @@ export const deleteZone = (id) => request(`/zones/${id}`, { method: 'DELETE' });
 
 export const getPonds = () => request('/ponds');
 export const addPond = (payload) => request('/ponds', { method: 'POST', body: JSON.stringify(payload) });
+export const updatePond = (id, payload) => request(`/ponds/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
 export const deletePond = (id) => request(`/ponds/${id}`, { method: 'DELETE' });
 
 export const getStations = () => request('/devices/stations');
@@ -65,120 +67,59 @@ export const deleteDevice = (id) => request(`/devices/inventory/${id}`, { method
 
 export const getSystemLogs = () => request('/logs');
 
-
-// Thêm vào file services/api.js hiện tại của bạn
-
-// Dashboard
-export const getDashboardSummary = async () => {
-    const token = localStorage.getItem('aq_token');
-    const res = await fetch('http://127.0.0.1:5000/api/dashboard/summary', {
-        headers: { 'Authorization': `Bearer ${token}` }
-    });
-    if (!res.ok) throw new Error('Lỗi tải dữ liệu Dashboard');
-    return res.json();
-};
-
 // Cấu hình Ao (Luật tự động)
-export const getPondConfig = async (aoId) => {
-    const res = await fetch(`http://127.0.0.1:5000/api/ponds/${aoId}/config`);
-    if (!res.ok) throw new Error('Lỗi tải cấu hình ao');
-    return res.json();
-};
+export const getPondConfig = (aoId) => request(`/ponds/${aoId}/config`);
 
-export const updatePondConfig = async (aoId, payload) => {
-    const token = localStorage.getItem('aq_token');
-    const res = await fetch(`http://127.0.0.1:5000/api/ponds/${aoId}/config`, {
+export const updatePondConfig = (aoId, payload) =>
+    request(`/ponds/${aoId}/config`, {
         method: 'PUT',
-        headers: { 
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}` 
-        },
-        body: JSON.stringify(payload) // { LoaiCamBien, min_value, max_value }
+        body: JSON.stringify(payload)
     });
-    if (!res.ok) throw new Error('Lỗi cập nhật cấu hình');
-    return res.json();
-};
 
 // Điều khiển Thiết bị
-export const updateDeviceStatus = async (deviceId, trang_thai) => {
-    const token = localStorage.getItem('aq_token');
-    const res = await fetch(`http://127.0.0.1:5000/api/devices/${deviceId}/status`, {
+export const updateDeviceStatus = (deviceId, trang_thai) =>
+    request(`/devices/${deviceId}/status`, {
         method: 'PUT',
-        headers: { 
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}` 
-        },
-        body: JSON.stringify({ trang_thai }) // 'HOAT_DONG' hoặc 'TAT'
+        body: JSON.stringify({ trang_thai })
     });
-    if (!res.ok) throw new Error('Lỗi điều khiển thiết bị');
-    return res.json();
-};
 
 // Quản lý User
-export const getUsers = async () => {
-    const token = localStorage.getItem('aq_token');
-    const res = await fetch('http://127.0.0.1:5000/api/users', {
-        headers: { 'Authorization': `Bearer ${token}` }
-    });
-    return res.json();
-};
+export const getUsers = () => request('/users');
 
-export const updateUserAreas = async (userId, khuvuc_ids) => {
-    const token = localStorage.getItem('aq_token');
-    const res = await fetch(`http://127.0.0.1:5000/api/users/${userId}/areas`, {
+export const updateUserAreas = (userId, khuvuc_ids) =>
+    request(`/users/${userId}/areas`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ khuvuc_ids })
     });
-    return res.json();
-};
 
 // Lịch trình
 export const getSchedules = () => request('/devices');
 
 // Báo cáo & Lịch sử cảm biến
-export const getSensorHistory = async (deviceId, days = 7) => {
-    const res = await fetch(`http://127.0.0.1:5000/api/sensors/history?device_id=${deviceId}&days=${days}`);
-    return res.json();
-};
+export const getSensorHistory = (deviceId) =>
+    request(`/sensors/${deviceId}/history`);
 
 // Thêm lịch trình mới
-export const addSchedule = async (payload) => {
-    const token = localStorage.getItem('aq_token');
-    const res = await fetch('http://127.0.0.1:5000/api/devices/schedules', {
+export const addSchedule = (payload) =>
+    request('/devices/schedules', {
         method: 'POST',
-        headers: { 
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}` 
-        },
-        body: JSON.stringify(payload) // { ma_tb_dieu_khien, start_time, end_time, ma_cong_thuc }
+        body: JSON.stringify(payload)
     });
-    if (!res.ok) throw new Error('Lỗi thêm lịch trình');
-    return res.json();
-};
+
+export const suggestSchedules = (payload) =>
+    request('/devices/schedules/suggest', {
+        method: 'POST',
+        body: JSON.stringify(payload)
+    });
 
 // Xóa lịch trình
-export const deleteSchedule = async (id) => {
-    const token = localStorage.getItem('aq_token');
-    const res = await fetch(`http://127.0.0.1:5000/api/devices/schedules/${id}`, {
+export const deleteSchedule = (id) =>
+    request(`/devices/schedules/${id}`, {
         method: 'DELETE',
-        headers: { 
-            'Authorization': `Bearer ${token}` 
-        }
     });
-    if (!res.ok) throw new Error('Lỗi xóa lịch trình');
-    return res.json();
-};
 
 //gọi lịch sử cho ăn
-export const getFeedingHistory = async () => {
-    const token = localStorage.getItem('aq_token');
-    const res = await fetch('http://127.0.0.1:5000/api/devices/feeding-history', {
-        headers: { 'Authorization': `Bearer ${token}` }
-    });
-    if (!res.ok) throw new Error('Lỗi tải lịch sử cho ăn');
-    return res.json();
-};
+export const getFeedingHistory = () => request('/devices/feeding-history');
 
 // Cập nhật chế độ hoạt động của ao (AUTO/MANUAL)
 export const updatePondMode = async (pondId, mode) => {
@@ -197,65 +138,30 @@ export const addFeedingFormula = (payload) =>
         body: JSON.stringify(payload)
     });
 
-//xóa công thức
-// Thêm vào src/services/api.js
-
 // Xóa công thức cho ăn
-export const deleteFeedingFormula = async (id) => {
-    const token = localStorage.getItem('aq_token');
-    const res = await fetch(`http://127.0.0.1:5000/api/devices/feeding-formulas/${id}`, {
+export const deleteFeedingFormula = (id) =>
+    request(`/devices/feeding-formulas/${id}`, {
         method: 'DELETE',
-        headers: { 
-            'Authorization': `Bearer ${token}` 
-        }
     });
-    if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.error || 'Lỗi xóa công thức');
-    }
-    return res.json();
-};
 
-export const createUser = async (payload) => {
-    const token = localStorage.getItem('aq_token');
-    const res = await fetch('http://127.0.0.1:5000/api/users', {
+export const createUser = (payload) =>
+    request('/users', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify(payload)
     });
-    if (!res.ok) throw new Error('Lỗi tạo người dùng');
-    return res.json();
-};
 
-export const updateUserRole = async (userId, ma_role) => {
-    const token = localStorage.getItem('aq_token');
-    const res = await fetch(`http://127.0.0.1:5000/api/users/${userId}/role`, {
+export const updateUserRole = (userId, ma_role) =>
+    request(`/users/${userId}/role`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ ma_role })
     });
-    if (!res.ok) throw new Error('Lỗi cập nhật role');
-    return res.json();
-};
 
 export const getReportSensors = (days = 7) =>
     request(`/ponds/sensor-report?days=${days}`);
 
 // Xóa người dùng
-
-export const deleteUserByAdmin = async (userId, ly_do_xoa) => {
-    const token = localStorage.getItem('aq_token');
-    const res = await fetch(`http://127.0.0.1:5000/api/users/${userId}`, {
+export const deleteUserByAdmin = (userId, ly_do_xoa) =>
+    request(`/users/${userId}`, {
         method: 'DELETE',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-        },
         body: JSON.stringify({ ly_do_xoa })
     });
-    if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.message || err.error || 'Lỗi xóa người dùng');
-    }
-    return res.json();
-};

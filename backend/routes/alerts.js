@@ -8,20 +8,26 @@ const { requireAuth, requirePermission } = require('../middlewares/rbac');
 // Get Warnings (Alerts) - Yêu cầu đăng nhập
 router.get('/', requireAuth, async (req, res) => {
     const statusFilter = req.query.status;
+    const pondId = req.query.pond_id;
     let query = `
         SELECT l.*, u.ten_dang_nhap as TenDangNhap 
         FROM log_he_thong l
         LEFT JOIN nguoi_dung u ON l.ma_nguoi_dung_tao = u.ma_nguoi_dung
         WHERE l.log_type = 'WARNING'
     `;
+    const params = [];
     
     if (statusFilter === 'unacknowledged') {
         query += ' AND l.acknowledged = 0';
     }
+    if (pondId) {
+        query += ' AND l.mo_ta LIKE ?';
+        params.push(`%[POND:${pondId}]%`);
+    }
     query += ' ORDER BY l.thoi_gian_khoi_tao DESC';
 
     try {
-        const [rows] = await db.execute(query);
+        const [rows] = await db.execute(query, params);
         res.json(rows);
     } catch (error) {
         res.status(500).json({ error: error.message });

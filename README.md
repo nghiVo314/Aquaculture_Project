@@ -143,6 +143,11 @@ Frontend se chay tai `http://localhost:5173`.
 
 Mo terminal moi:
 
+
+co venv da cai san adafruit-io requests pyserial
+source .venv/bin/activate
+python gateway/main.py
+
 ```bash
 python gateway/main.py
 ```

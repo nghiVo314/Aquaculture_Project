@@ -22,7 +22,7 @@ def init_ponds_data_from_server():
     try:
         print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Đang tải dữ liệu cấu trúc hệ thống từ Server...")
         # Gọi API mới mà bạn sẽ viết bên Node.js (tên API do bạn tự định nghĩa)
-        response = requests.get("http://127.0.0.1:5000/api/ponds/gateway-init", timeout=5)
+        response = requests.get("http://localhost:5000/api/ponds/gateway-init", timeout=5)
         
         if response.status_code == 200:
             server_ponds = response.json()
@@ -71,7 +71,7 @@ def init_ponds_data_from_server():
 def sync_schedules_from_server(pond_key):
     try:
         feeder_id = ponds_data[pond_key]["feeder_id"]
-        response = requests.get(f"http://127.0.0.1:5000/api/devices/gateway/{feeder_id}", timeout=3)
+        response = requests.get(f"http://localhost:5000/api/devices/gateway/{feeder_id}", timeout=3)
         if response.status_code == 200:
             ponds_data[pond_key]["schedules"] = response.json().get("schedules", [])
             print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Đã đồng bộ Lịch trình ao {pond_key} thành công!")
@@ -96,7 +96,7 @@ def get_active_schedule(pond_key):
 def sync_config_from_server(pond_key):
     try:
         ao_id = ponds_data[pond_key]["ao_id"]
-        response = requests.get(f"http://127.0.0.1:5000/api/ponds/{ao_id}/config", timeout=3)
+        response = requests.get(f"http://localhost:5000/api/ponds/{ao_id}/config", timeout=3)
         if response.status_code == 200:
             
             data = response.json()
@@ -125,7 +125,7 @@ def sync_config_from_server(pond_key):
 def sync_device_status_from_server(pond_key):
     try:
         ao_id = ponds_data[pond_key]["ao_id"]
-        response = requests.get(f"http://127.0.0.1:5000/api/devices/gateway/status/{ao_id}", timeout=3)
+        response = requests.get(f"http://localhost:5000/api/devices/gateway/status/{ao_id}", timeout=3)
         if response.status_code == 200:
             server_devices = response.json().get("devices", [])
             
@@ -165,7 +165,7 @@ def control_device(pond_key, device_name, action):
         #UPDATE DEVICE STATUS chắc cần auth nhưng thôi kệ không ảnh hưởng gì => bỏ auth bên backend?
         try:
             res = requests.put(
-                f"http://127.0.0.1:5000/api/devices/{device_id}/status",
+                f"http://localhost:5000/api/devices/{device_id}/status",
                 json={"trang_thai": db_status},
                 timeout=3
             )
@@ -183,7 +183,7 @@ def control_device(pond_key, device_name, action):
 
                 try:
                     res = requests.post(
-                        "http://127.0.0.1:5000/api/devices/feeding-history",
+                        "http://localhost:5000/api/devices/feeding-history",
                         json={
                             "ma_cong_thuc": ma_cong_thuc,
                             "ma_tb_dieu_khien": device_id,
@@ -256,7 +256,7 @@ def processData(pond_key, sensor_type, value):
     # Gửi dữ liệu về backend    
     try:
         device_id = sensor_ids.get(sensor_type, "CB_UNKNOWN")
-        res = requests.post("http://127.0.0.1:5000/api/sensors", json={
+        res = requests.post("http://localhost:5000/api/sensors", json={
             "device_id": device_id, 
             "value": value
         })
@@ -391,7 +391,7 @@ def check_reload_signal():
     global ponds_data
     try:
         # Gọi API check-reload với timeout rất ngắn để không treo vòng lặp
-        response = requests.get("http://127.0.0.1:5000/api/ponds/check-reload", timeout=1)
+        response = requests.get("http://localhost:5000/api/ponds/check-reload", timeout=1)
         if response.status_code == 200:
             data = response.json()
             if data.get("reload") == True:
@@ -477,7 +477,7 @@ while True:
 #     try:
 #         print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Đang tải dữ liệu cấu trúc hệ thống từ Server...")
 #         # Gọi API mới mà bạn sẽ viết bên Node.js (tên API do bạn tự định nghĩa)
-#         response = requests.get("http://127.0.0.1:5000/api/ponds/gateway-init", timeout=5)
+#         response = requests.get("http://localhost:5000/api/ponds/gateway-init", timeout=5)
         
 #         if response.status_code == 200:
 #             server_ponds = response.json()
@@ -530,7 +530,7 @@ while True:
 # def sync_schedules_from_server(pond_key):
 #     try:
 #         feeder_id = ponds_data[pond_key]["feeder_id"]
-#         response = requests.get(f"http://127.0.0.1:5000/api/devices/gateway/{feeder_id}", timeout=3)
+#         response = requests.get(f"http://localhost:5000/api/devices/gateway/{feeder_id}", timeout=3)
 #         if response.status_code == 200:
 #             ponds_data[pond_key]["schedules"] = response.json().get("schedules", [])
 #             print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Đã đồng bộ Lịch trình ao {pond_key} thành công!")
@@ -555,7 +555,7 @@ while True:
 # def sync_config_from_server(pond_key):
 #     try:
 #         ao_id = ponds_data[pond_key]["ao_id"]
-#         response = requests.get(f"http://127.0.0.1:5000/api/ponds/{ao_id}/config", timeout=3)
+#         response = requests.get(f"http://localhost:5000/api/ponds/{ao_id}/config", timeout=3)
 #         if response.status_code == 200:
             
 #             data = response.json()
@@ -584,7 +584,7 @@ while True:
 # def sync_device_status_from_server(pond_key):
 #     try:
 #         ao_id = ponds_data[pond_key]["ao_id"]
-#         response = requests.get(f"http://127.0.0.1:5000/api/devices/gateway/status/{ao_id}", timeout=3)
+#         response = requests.get(f"http://localhost:5000/api/devices/gateway/status/{ao_id}", timeout=3)
 #         if response.status_code == 200:
 #             server_devices = response.json().get("devices", [])
             
@@ -620,7 +620,7 @@ while True:
 #         #UPDATE DEVICE STATUS chắc cần auth nhưng thôi kệ không ảnh hưởng gì => bỏ auth bên backend?
 #         try:
 #             res = requests.put(
-#                 f"http://127.0.0.1:5000/api/devices/{device_id}/status",
+#                 f"http://localhost:5000/api/devices/{device_id}/status",
 #                 json={"trang_thai": db_status},
 #                 timeout=3
 #             )
@@ -638,7 +638,7 @@ while True:
 
 #                 try:
 #                     res = requests.post(
-#                         "http://127.0.0.1:5000/api/devices/feeding-history",
+#                         "http://localhost:5000/api/devices/feeding-history",
 #                         json={
 #                             "ma_cong_thuc": ma_cong_thuc,
 #                             "ma_tb_dieu_khien": device_id,
@@ -706,7 +706,7 @@ while True:
 #     # Gửi dữ liệu về backend    
 #     try:
 #         device_id = sensor_ids.get(sensor_type, "CB_UNKNOWN")
-#         res = requests.post("http://127.0.0.1:5000/api/sensors", json={
+#         res = requests.post("http://localhost:5000/api/sensors", json={
 #             "device_id": device_id, 
 #             "value": value
 #         })
@@ -841,7 +841,7 @@ while True:
 #     global ponds_data
 #     try:
 #         # Gọi API check-reload với timeout rất ngắn để không treo vòng lặp
-#         response = requests.get("http://127.0.0.1:5000/api/ponds/check-reload", timeout=1)
+#         response = requests.get("http://localhost:5000/api/ponds/check-reload", timeout=1)
 #         if response.status_code == 200:
 #             data = response.json()
 #             if data.get("reload") == True:

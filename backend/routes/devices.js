@@ -4,6 +4,16 @@ const db = require('../services/db');
 // Đã thay authorizeRoles bằng requirePermission
 const { requireAuth, requirePermission } = require('../middlewares/rbac');
 
+function parseTimeToMinutes(value) {
+    if (!value || !/^\d{2}:\d{2}(:\d{2})?$/.test(value)) return null;
+    const [hh, mm] = value.split(':').map(Number);
+    return hh * 60 + mm;
+}
+
+function overlap(aStart, aEnd, bStart, bEnd) {
+    return aStart < bEnd && bStart < aEnd;
+}
+
 // Xem danh sách trạm
 router.get('/stations', requireAuth, async (req, res) => {
     try {
@@ -208,6 +218,33 @@ router.post('/schedules', requireAuth, requirePermission('device:status:update')
     const { ma_tb_dieu_khien, start_time, end_time, ma_cong_thuc } = req.body;
 
     try {
+        const startMins = parseTimeToMinutes(start_time);
+        const endMins = parseTimeToMinutes(end_time);
+        if (!ma_tb_dieu_khien || startMins == null || endMins == null) {
+            return res.status(400).json({ error: 'Thiếu thiết bị hoặc định dạng giờ không hợp lệ (HH:mm)' });
+        }
+        if (startMins >= endMins) {
+            return res.status(400).json({ error: 'Giờ bắt đầu phải nhỏ hơn giờ kết thúc' });
+        }
+
+        const [existingRows] = await db.execute(
+            `SELECT ma_lich_trinh, thoi_gian_bat_dau, thoi_gian_ket_thuc
+             FROM lich_trinh
+             WHERE ma_tb_dieu_khien = ?`,
+            [ma_tb_dieu_khien]
+        );
+
+        for (const row of existingRows) {
+            const rowStart = parseTimeToMinutes(row.thoi_gian_bat_dau);
+            const rowEnd = parseTimeToMinutes(row.thoi_gian_ket_thuc);
+            if (rowStart == null || rowEnd == null) continue;
+            if (overlap(startMins, endMins, rowStart, rowEnd)) {
+                return res.status(409).json({
+                    error: `Lịch bị trùng với lịch #${row.ma_lich_trinh} (${row.thoi_gian_bat_dau}-${row.thoi_gian_ket_thuc})`
+                });
+            }
+        }
+
         await db.execute(
             `INSERT INTO lich_trinh 
                 (ma_tb_dieu_khien, thoi_gian_bat_dau, thoi_gian_ket_thuc, ma_cong_thuc)
@@ -215,6 +252,51 @@ router.post('/schedules', requireAuth, requirePermission('device:status:update')
             [ma_tb_dieu_khien, start_time, end_time, ma_cong_thuc || null]
         );
         res.json({ status: 'success', message: 'Thêm lịch trình thành công' });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+router.post('/schedules/suggest', requireAuth, requirePermission('device:status:update'), async (req, res) => {
+    const { ao_id, ma_tb_dieu_khien } = req.body;
+    if (!ao_id || !ma_tb_dieu_khien) {
+        return res.status(400).json({ error: 'Thiếu ao_id hoặc ma_tb_dieu_khien' });
+    }
+
+    try {
+        const [[metrics]] = await db.execute(
+            `SELECT
+                AVG(CASE WHEN cb.loai_cam_bien = 'TEMP' THEN dl.gia_tri END) AS avg_temp_24h,
+                AVG(CASE WHEN cb.loai_cam_bien = 'LIGHT' THEN dl.gia_tri END) AS avg_light_24h
+             FROM du_lieu_quan_trac dl
+             JOIN cam_bien cb ON dl.ma_cam_bien = cb.ma_thiet_bi
+             JOIN thiet_bi_tai_bien tbtb ON cb.ma_thiet_bi = tbtb.ma_thiet_bi
+             JOIN tram_bien tb ON tbtb.ma_tram = tb.ma_tram
+             WHERE tb.ma_ao_nuoi = ?
+               AND dl.thoi_gian >= NOW() - INTERVAL 1 DAY`,
+            [ao_id]
+        );
+
+        const avgTemp = Number(metrics?.avg_temp_24h || 26);
+        const avgLight = Number(metrics?.avg_light_24h || 30);
+        const duration = avgTemp > 28 || avgLight < 10 ? 30 : 20;
+
+        const suggestions = [
+            { start_time: '06:00', end_time: `06:${String(duration).padStart(2, '0')}`, reason: 'Buổi sáng, ưu tiên ổn định môi trường.' },
+            { start_time: '12:00', end_time: `12:${String(duration).padStart(2, '0')}`, reason: 'Giữa ngày, bổ sung theo mức nhiệt/ánh sáng hiện tại.' },
+            { start_time: '18:00', end_time: `18:${String(duration).padStart(2, '0')}`, reason: 'Buổi chiều, giảm dao động trước ban đêm.' }
+        ].map((item, idx) => ({
+            id: `SUGGEST_${idx + 1}`,
+            ao_id,
+            ma_tb_dieu_khien,
+            ...item
+        }));
+
+        res.json({
+            status: 'success',
+            metrics: { avg_temp_24h: avgTemp, avg_light_24h: avgLight },
+            suggestions
+        });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }

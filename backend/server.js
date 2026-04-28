@@ -12,6 +12,7 @@ const pondsRouter = require('./routes/ponds')
 const usersRouter = require('./routes/users')
 const zonesRouter = require('./routes/zones')
 const devicesRouter = require('./routes/devices')
+const { startAlertEngine } = require('./jobs/alertEngine')
 // Add scheduleRouter or devicesRouter if you created them!
 
 const app = express()
@@ -39,5 +40,6 @@ if (process.env.NODE_ENV !== 'test') {
   const PORT = process.env.PORT || 5000
   app.listen(PORT, () => {
     console.log(`Server chạy port ${PORT}`)
+    startAlertEngine()
   })
 }

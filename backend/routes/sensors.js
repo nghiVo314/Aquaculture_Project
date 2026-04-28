@@ -34,16 +34,25 @@ router.get('/latest', async (req, res) => {
 
 router.get('/check-offline', async (req, res) => {
     try {
-        // Schema2 doesn't have LastActive, so we check the latest recorded time for each sensor
+        const offlineMinutes = Number(req.query.minutes || process.env.SENSOR_OFFLINE_MINUTES || 10);
         const [offline_devices] = await db.execute(
-            `SELECT ma_cam_bien 
-             FROM du_lieu_quan_trac 
-             GROUP BY ma_cam_bien
-             HAVING MAX(thoi_gian) < NOW() - INTERVAL 5 HOUR`
+            `SELECT
+                cb.ma_thiet_bi AS ma_cam_bien,
+                cb.loai_cam_bien,
+                an.ma_ao_nuoi AS ma_ao_nuoi,
+                MAX(dl.thoi_gian) AS lan_cuoi
+             FROM cam_bien cb
+             JOIN thiet_bi_tai_bien tbtb ON cb.ma_thiet_bi = tbtb.ma_thiet_bi
+             JOIN tram_bien tb ON tbtb.ma_tram = tb.ma_tram
+             JOIN ao_nuoi an ON tb.ma_ao_nuoi = an.ma_ao_nuoi
+             LEFT JOIN du_lieu_quan_trac dl ON dl.ma_cam_bien = cb.ma_thiet_bi
+             GROUP BY cb.ma_thiet_bi, cb.loai_cam_bien, an.ma_ao_nuoi
+             HAVING lan_cuoi IS NULL OR lan_cuoi < NOW() - INTERVAL ? MINUTE`,
+            [offlineMinutes]
         );
 
         if (offline_devices.length > 0) {
-            return res.json({ status: 'warning', offline_devices });
+            return res.json({ status: 'warning', offline_devices, offlineMinutes });
         }
         res.json({ status: 'ok', message: 'Tất cả thiết bị đều hoạt động bình thường.' });
     } catch (error) {

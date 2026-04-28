@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import {
   LineChart,
   Line,
@@ -297,7 +298,15 @@ const ReportPage = () => {
                           justifyContent: 'space-between'
                         }}
                       >
-                        <span>{pondId}</span>
+                        <span>
+                          <Link
+                            to={`/ao-nuoi/${pondId}`}
+                            onClick={(event) => event.stopPropagation()}
+                            style={{ color: '#1677ff', textDecoration: 'none' }}
+                          >
+                            {pondId}
+                          </Link>
+                        </span>
                         <span>{expanded ? '▲' : '▼'}</span>
                       </div>
 
