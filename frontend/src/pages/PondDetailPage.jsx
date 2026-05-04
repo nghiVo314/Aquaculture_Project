@@ -295,6 +295,9 @@ const handleDeleteFormula = async (formulaId) => {
               </span>
             </div>
             <SensorChart deviceId={sensor.ma_cam_bien} label={sensor.LoaiCamBien} />
+            <div style={{ fontSize: '0.8em', color: '#888', marginTop: '5px' }}>
+              Ngưỡng an toàn: {sensor.min_value} - {sensor.max_value}
+            </div>
           </div>
         ))}
       </div>
