@@ -33,11 +33,11 @@ router.get('/summary', requireAuth, async (req, res) => {
             [logsResult],
             [areaResult]
         ] = await Promise.all([
-            db.execute(`SELECT COUNT(*) as total_khuvuc FROM khu_vuc ${whereKhuVuc}`, queryParams),
-            db.execute(`SELECT COUNT(*) as total_vunuoi FROM vu_nuoi ${whereVuNuoi}`, queryParams),
-            db.execute(`SELECT COUNT(*) as total_aonuoi FROM ao_nuoi ${whereAoNuoi}`, queryParams),
+            db.execute(`SELECT COUNT(*) as total_khuvuc FROM khu_vuc`),
+            db.execute(`SELECT COUNT(*) as total_vunuoi FROM vu_nuoi`),
+            db.execute(`SELECT COUNT(*) as total_aonuoi FROM ao_nuoi`),
             db.execute(`SELECT COUNT(*) as unhandled_logs FROM log_he_thong WHERE acknowledged = 0`),
-            db.execute(`SELECT SUM(dien_tich) as total_area FROM ao_nuoi ${whereAoNuoi}`, queryParams)
+            db.execute(`SELECT SUM(dien_tich) as total_area FROM ao_nuoi`)
         ]);
 
         // ==========================================
@@ -59,6 +59,17 @@ router.get('/summary', requireAuth, async (req, res) => {
         }
         zoneQuery += ` GROUP BY kv.ma_khu_vuc, kv.loai_thuy_san`;
         const [zonesData] = await db.execute(zoneQuery, queryParams);
+
+        const [globalZonesData] = await db.execute(`
+            SELECT 
+                kv.ma_khu_vuc as KhuVuc_ID, 
+                kv.loai_thuy_san as LoaiHaiSan,
+                COUNT(DISTINCT an.ma_ao_nuoi) as so_ao,
+                SUM(an.dien_tich) as tong_dien_tich
+            FROM khu_vuc kv
+            LEFT JOIN ao_nuoi an ON kv.ma_khu_vuc = an.ma_khu_vuc
+            GROUP BY kv.ma_khu_vuc, kv.loai_thuy_san
+        `);
 
         // BƯỚC 2.2: Lấy danh sách Ao Nuôi
         let pondQuery = `SELECT ma_ao_nuoi as AoNuoi_ID, ma_khu_vuc as KhuVuc_ID, dien_tich FROM ao_nuoi ${whereAoNuoi}`;
@@ -107,7 +118,8 @@ router.get('/summary', requireAuth, async (req, res) => {
                 unhandled_logs: logsResult[0].unhandled_logs,
                 total_area: areaResult[0].total_area || 0
             },
-            zones: nestedZones
+            zones: nestedZones,
+            globalZones: globalZonesData // Dữ liệu tổng hợp cho tất cả người dùng (dành cho admin) để vẽ biểu đồ phân tích theo khu vực
         });
 
     } catch (error) {

@@ -286,15 +286,15 @@ const DashboardPage = () => {
       {/* SECTION 1: TOP KPI CARDS */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <KpiCard 
-          title="Tổng Khu Vực" value={data.zones?.length || 0} icon={LayoutDashboard} 
+          title="Tổng Khu Vực" value={data.cards?.khuvuc || 0} icon={LayoutDashboard} 
           colorClass="text-blue-600" bgColorClass="bg-blue-100" tooltip="Số lượng khu vực đang quản lý"
         />
         <KpiCard 
-          title="Tổng Số Ao" value={totalPonds} icon={Waves} 
+          title="Tổng Số Ao" value={data.cards?.aonuoi || 0} icon={Waves} 
           colorClass="text-cyan-600" bgColorClass="bg-cyan-100" tooltip="Tổng số ao trong toàn hệ thống"
         />
         <KpiCard 
-          title="Tổng Diện Tích" value={`${totalArea.toLocaleString()} m²`} icon={Activity} 
+          title="Tổng Diện Tích" value={`${data.cards?.total_area?.toLocaleString() || 0} m²`} icon={Activity} 
           colorClass="text-emerald-600" bgColorClass="bg-emerald-100" tooltip="Tổng diện tích mặt nước"
         />
         {/* <KpiCard 
@@ -316,7 +316,7 @@ const DashboardPage = () => {
           <h3 className="text-lg font-semibold text-gray-800 mb-4">Thống kê theo Khu vực</h3>
           <div className="h-72 w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={data.zones} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+              <BarChart data={data.globalZones || []} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
                 <XAxis dataKey="KhuVuc_ID" stroke="#6B7280" />
                 <YAxis yAxisId="left" orientation="left" stroke="#0ea5e9" />
