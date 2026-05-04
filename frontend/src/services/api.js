@@ -42,9 +42,10 @@ export const getLatestSensors = () => request('/sensors/latest');
 export const getAlerts = (status = '') => request(`/alerts${status ? `?status=${status}` : ''}`);
 export const getPondAlerts = (pondId, status = 'unacknowledged') =>
     request(`/alerts?pond_id=${encodeURIComponent(pondId)}${status ? `&status=${status}` : ''}`);
-export const acknowledgeAlert = (logId) =>
+export const acknowledgeAlert = (logId, userId) =>
     request(`/alerts/${logId}/ack`, {
-        method: 'PUT'
+        method: 'PUT',
+        body: JSON.stringify({ User_ID: userId })
     });
 
 export const getZones = () => request('/zones');

@@ -6,6 +6,18 @@ const { requireAuth } = require('../middlewares/rbac');
 function isAdmin(req) {
     return Array.isArray(req.user?.roles) && req.user.roles.includes('admin');
 }
+// Hàm ghi log hệ thống
+async function ghiLog(ma_nguoi_dung, log_type, mo_ta) {
+    try {
+        await db.execute(
+            `INSERT INTO log_he_thong (ma_nguoi_dung_tao, log_type, source_type, acknowledged, mo_ta) 
+             VALUES (?, ?, 'MANUAL', 1, ?)`,
+            [ma_nguoi_dung, log_type, mo_ta]
+        );
+    } catch (error) {
+        console.log('Lỗi ghi log:', error.message);
+    }
+}
 
 // 1. Lấy tất cả users (Cập nhật query theo DB mới)
 router.get('/', async (req, res) => {
@@ -47,14 +59,25 @@ router.post('/', async (req, res) => {
             [ma_nguoi_dung, ten_dang_nhap, mat_khau]
         );
 
-        if (ma_role) {
-            await connection.execute(
-                `INSERT INTO nguoi_dung_role (ma_nguoi_dung, ma_role) VALUES (?, ?)`,
-                [ma_nguoi_dung, ma_role]
-            );
-        }
+        // if (ma_role) {
+        //     await connection.execute(
+        //         `INSERT INTO nguoi_dung_role (ma_nguoi_dung, ma_role) VALUES (?, ?)`,
+        //         [ma_nguoi_dung, ma_role]
+        //     );
+        // }
+        //Logic gán vai trò mặc định. Nếu ma_role không được cung cấp, sẽ gán ROLE_ADMIN
+        const assignedRole = ma_role || 'ROLE_ADMIN'; 
+
+        await connection.execute(
+            `INSERT INTO nguoi_dung_role (ma_nguoi_dung, ma_role) VALUES (?, ?)`,
+            [ma_nguoi_dung, assignedRole]
+        );
 
         await connection.commit();
+        // Ghi log sau khi tạo user thành công
+        const creatorId = req.user?.id || 'USR_ADMIN'; 
+        await ghiLog(creatorId, 'CREATE_USER', `Thêm mới người dùng: ${ten_dang_nhap}`);
+
         res.json({ status: 'success', message: 'Tạo người dùng thành công' });
     } catch (error) {
         await connection.rollback();
@@ -185,6 +208,7 @@ router.delete('/:id', requireAuth, async (req, res) => {
              VALUES (?, 'DELETE_USER', 'MANUAL', 1, ?)`,
             [req.user.id, moTa]
         );
+        await ghiLog(req.user.id, 'DELETE_USER', `Xóa người dùng ${users[0].ten_dang_nhap}.`);
 
         // Hard delete
         await connection.execute(
