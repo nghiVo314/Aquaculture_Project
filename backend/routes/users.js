@@ -46,6 +46,136 @@ router.get('/', async (req, res) => {
     }
 });
 
+// 1b. Lấy danh sách người quản lý để gán cho khu vực
+router.get('/managers', requireAuth, async (req, res) => {
+    try {
+        const [rows] = await db.execute(
+            `SELECT DISTINCT
+                u.ma_nguoi_dung AS ma_nguoi_dung,
+                u.ten_dang_nhap AS ten_dang_nhap,
+                r.ma_role AS ma_role,
+                r.role_name AS role_name
+             FROM nguoi_dung u
+             INNER JOIN nguoi_dung_role ur ON u.ma_nguoi_dung = ur.ma_nguoi_dung
+             INNER JOIN role r ON ur.ma_role = r.ma_role
+             WHERE r.ma_role = 'manager' OR LOWER(r.role_name) LIKE '%quản lý%'
+             ORDER BY u.ten_dang_nhap ASC`
+        );
+
+        res.json(rows);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// 1c. Lấy danh sách worker để gán cho ao nuôi
+router.get('/workers', requireAuth, async (req, res) => {
+    try {
+        const [rows] = await db.execute(
+            `SELECT DISTINCT
+                u.ma_nguoi_dung AS ma_nguoi_dung,
+                u.ten_dang_nhap AS ten_dang_nhap,
+                r.ma_role AS ma_role,
+                r.role_name AS role_name
+             FROM nguoi_dung u
+             INNER JOIN nguoi_dung_role ur ON u.ma_nguoi_dung = ur.ma_nguoi_dung
+             INNER JOIN role r ON ur.ma_role = r.ma_role
+             WHERE r.ma_role = 'worker' OR LOWER(r.role_name) LIKE '%công nhân%'
+             ORDER BY u.ten_dang_nhap ASC`
+        );
+
+        res.json(rows);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// 1d. Lấy thống kê workload cho mỗi worker (số ao, số cảnh báo chưa xác nhận)
+router.get('/workers/workload/stats', requireAuth, async (req, res) => {
+    try {
+        const [workers] = await db.execute(
+            `SELECT DISTINCT
+                u.ma_nguoi_dung,
+                u.ten_dang_nhap,
+                r.ma_role,
+                r.role_name
+             FROM nguoi_dung u
+             INNER JOIN nguoi_dung_role ur ON u.ma_nguoi_dung = ur.ma_nguoi_dung
+             INNER JOIN role r ON ur.ma_role = r.ma_role
+             WHERE r.ma_role = 'worker' OR LOWER(r.role_name) LIKE '%công nhân%'
+             ORDER BY u.ten_dang_nhap ASC`
+        );
+
+        const [workerTableCheck] = await db.execute(
+            `SELECT COUNT(*) AS total
+             FROM INFORMATION_SCHEMA.TABLES
+             WHERE TABLE_SCHEMA = DATABASE()
+               AND TABLE_NAME = 'ao_nuoi_workers'`
+        );
+        const hasWorkerAssignments = Number(workerTableCheck?.[0]?.total || 0) > 0;
+
+        const workloadData = [];
+
+        for (const worker of workers) {
+            // Lấy danh sách ao phụ trách
+            const [ponds] = hasWorkerAssignments
+                ? await db.execute(
+                    `SELECT DISTINCT pond.ma_ao_nuoi, pond.ma_khu_vuc, pond.dien_tich, pond.loai_thuy_san
+                     FROM (
+                         SELECT a.ma_ao_nuoi, a.ma_khu_vuc, a.dien_tich, k.loai_thuy_san
+                         FROM ao_nuoi_workers aow
+                         JOIN ao_nuoi a ON aow.ma_ao_nuoi = a.ma_ao_nuoi
+                         JOIN khu_vuc k ON a.ma_khu_vuc = k.ma_khu_vuc
+                         WHERE aow.ma_nguoi_dung = ?
+                         UNION ALL
+                         SELECT a.ma_ao_nuoi, a.ma_khu_vuc, a.dien_tich, k.loai_thuy_san
+                         FROM ao_nuoi a
+                         JOIN khu_vuc k ON a.ma_khu_vuc = k.ma_khu_vuc
+                         WHERE a.ma_nguoi_dung_phu_trach = ?
+                     ) AS pond`,
+                    [worker.ma_nguoi_dung, worker.ma_nguoi_dung]
+                )
+                : await db.execute(
+                    `SELECT a.ma_ao_nuoi, a.ma_khu_vuc, a.dien_tich, k.loai_thuy_san
+                     FROM ao_nuoi a
+                     JOIN khu_vuc k ON a.ma_khu_vuc = k.ma_khu_vuc
+                     WHERE a.ma_nguoi_dung_phu_trach = ?`,
+                    [worker.ma_nguoi_dung]
+                );
+
+            // Lấy số cảnh báo chưa xác nhận cho các ao của worker này
+            let unacknowledgedAlerts = 0;
+            if (ponds.length > 0) {
+                const pondIds = ponds.map(p => p.ma_ao_nuoi);
+                for (const pondId of pondIds) {
+                    const [alerts] = await db.execute(
+                        `SELECT COUNT(*) as count FROM log_he_thong
+                         WHERE log_type = 'WARNING'
+                           AND acknowledged = 0
+                           AND mo_ta LIKE ?`,
+                        [`%[POND:${pondId}]%`]
+                    );
+                    unacknowledgedAlerts += alerts[0]?.count || 0;
+                }
+            }
+
+            workloadData.push({
+                ma_nguoi_dung: worker.ma_nguoi_dung,
+                ten_dang_nhap: worker.ten_dang_nhap,
+                ma_role: worker.ma_role,
+                role_name: worker.role_name,
+                pond_count: ponds.length,
+                assigned_ponds: ponds,
+                unacknowledged_alerts: unacknowledgedAlerts
+            });
+        }
+
+        res.json(workloadData);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // 2. Thêm người dùng mới & Gán Role
 router.post('/', async (req, res) => {
     const { ten_dang_nhap, mat_khau, ma_role } = req.body;
@@ -142,11 +272,15 @@ router.put('/:user_id/areas', async (req, res) => {
 // 5. Get permitted ponds for a specific worker
 router.get('/:user_id/my-ponds', async (req, res) => {
     try {
+        const pondRoutes = require('./ponds');
+        if (pondRoutes?.ensurePondWorkerColumn) {
+            await pondRoutes.ensurePondWorkerColumn(db);
+        }
         const [ponds] = await db.execute(
             `SELECT a.ma_ao_nuoi as AoNuoi_ID, a.ma_khu_vuc as KhuVuc_ID, k.loai_thuy_san as LoaiHaiSan
              FROM ao_nuoi a
              JOIN khu_vuc k ON a.ma_khu_vuc = k.ma_khu_vuc
-             WHERE k.ma_nguoi_dung_quan_ly = ?`,
+             WHERE a.ma_nguoi_dung_phu_trach = ?`,
             [req.params.user_id]
         );
         res.json(ponds);

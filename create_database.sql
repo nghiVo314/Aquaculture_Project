@@ -1,6 +1,7 @@
 CREATE DATABASE IF NOT EXISTS ql_ao_nuoi;
 USE ql_ao_nuoi;
 
+DROP TABLE IF EXISTS `nguoi_dung`;
 CREATE TABLE `nguoi_dung` (
   `ma_nguoi_dung` varchar(50) NOT NULL,
   `ten_dang_nhap` varchar(50) NOT NULL,
@@ -9,20 +10,20 @@ CREATE TABLE `nguoi_dung` (
   PRIMARY KEY (`ma_nguoi_dung`),
   UNIQUE KEY `ten_dang_nhap` (`ten_dang_nhap`)
 );
-
+DROP TABLE IF EXISTS `role`;
 CREATE TABLE `role` (
   `ma_role` varchar(20) NOT NULL,
   `role_name` varchar(50) NOT NULL,
   `mo_ta` text,
   PRIMARY KEY (`ma_role`)
 );
-
+DROP TABLE IF EXISTS `quyen`;
 CREATE TABLE `quyen` (
   `ma_quyen` varchar(50) NOT NULL,
   `ten_quyen` varchar(100) NOT NULL,
   PRIMARY KEY (`ma_quyen`)
 );
-
+DROP TABLE IF EXISTS `nguoi_dung_role`;
 CREATE TABLE `nguoi_dung_role` (
   `ma_nguoi_dung` varchar(50) NOT NULL,
   `ma_role` varchar(20) NOT NULL,
@@ -30,7 +31,7 @@ CREATE TABLE `nguoi_dung_role` (
   FOREIGN KEY (`ma_nguoi_dung`) REFERENCES `nguoi_dung`(`ma_nguoi_dung`) ON DELETE CASCADE,
   FOREIGN KEY (`ma_role`) REFERENCES `role`(`ma_role`) ON DELETE CASCADE
 );
-
+DROP TABLE IF EXISTS `role_quyen`;
 CREATE TABLE `role_quyen` (
   `ma_role` varchar(20) NOT NULL,
   `ma_quyen` varchar(50) NOT NULL,
@@ -38,7 +39,7 @@ CREATE TABLE `role_quyen` (
   FOREIGN KEY (`ma_role`) REFERENCES `role`(`ma_role`) ON DELETE CASCADE,
   FOREIGN KEY (`ma_quyen`) REFERENCES `quyen`(`ma_quyen`) ON DELETE CASCADE
 );
-
+DROP TABLE IF EXISTS `khu_vuc`;
 CREATE TABLE `khu_vuc` (
   `ma_khu_vuc` varchar(50) NOT NULL,
   `ma_nguoi_dung_quan_ly` varchar(50) DEFAULT NULL,
@@ -46,16 +47,19 @@ CREATE TABLE `khu_vuc` (
   PRIMARY KEY (`ma_khu_vuc`),
   FOREIGN KEY (`ma_nguoi_dung_quan_ly`) REFERENCES `nguoi_dung`(`ma_nguoi_dung`) ON DELETE SET NULL
 );
-
+DROP TABLE IF EXISTS `ao_nuoi`;
 CREATE TABLE `ao_nuoi` (
   `ma_ao_nuoi` varchar(50) NOT NULL,
   `ma_khu_vuc` varchar(50) NOT NULL,
   `dien_tich` float DEFAULT NULL,
   `che_do` enum('AUTO','MANUAL') DEFAULT 'AUTO',
+  `ma_nguoi_dung_phu_trach` varchar(50) DEFAULT NULL,
   PRIMARY KEY (`ma_ao_nuoi`),
+  UNIQUE KEY `uniq_ao_worker` (`ma_nguoi_dung_phu_trach`),
+  KEY `ma_nguoi_dung_phu_trach` (`ma_nguoi_dung_phu_trach`),
   FOREIGN KEY (`ma_khu_vuc`) REFERENCES `khu_vuc`(`ma_khu_vuc`) ON DELETE CASCADE
 );
-
+DROP TABLE IF EXISTS `tram_bien`;
 CREATE TABLE `tram_bien` (
   `ma_tram` varchar(50) NOT NULL,
   `ma_ao_nuoi` varchar(50) NOT NULL,
@@ -63,7 +67,7 @@ CREATE TABLE `tram_bien` (
   PRIMARY KEY (`ma_tram`),
   FOREIGN KEY (`ma_ao_nuoi`) REFERENCES `ao_nuoi`(`ma_ao_nuoi`) ON DELETE CASCADE
 );
-
+DROP TABLE IF EXISTS `thiet_bi_tai_bien`;
 CREATE TABLE `thiet_bi_tai_bien` (
   `ma_thiet_bi` varchar(50) NOT NULL,
   `ma_tram` varchar(50) NOT NULL,
@@ -72,28 +76,28 @@ CREATE TABLE `thiet_bi_tai_bien` (
   PRIMARY KEY (`ma_thiet_bi`),
   FOREIGN KEY (`ma_tram`) REFERENCES `tram_bien`(`ma_tram`) ON DELETE CASCADE
 );
-
+DROP TABLE IF EXISTS `cam_bien`;
 CREATE TABLE `cam_bien` (
   `ma_thiet_bi` varchar(50) NOT NULL,
   `loai_cam_bien` varchar(100) DEFAULT NULL,
   PRIMARY KEY (`ma_thiet_bi`),
   FOREIGN KEY (`ma_thiet_bi`) REFERENCES `thiet_bi_tai_bien`(`ma_thiet_bi`) ON DELETE CASCADE
 );
-
+DROP TABLE IF EXISTS `thiet_bi_dieu_khien`;
 CREATE TABLE `thiet_bi_dieu_khien` (
   `ma_thiet_bi` varchar(50) NOT NULL,
   `loai_thiet_bi` varchar(100) DEFAULT NULL,
   PRIMARY KEY (`ma_thiet_bi`),
   FOREIGN KEY (`ma_thiet_bi`) REFERENCES `thiet_bi_tai_bien`(`ma_thiet_bi`) ON DELETE CASCADE
 );
-
+DROP TABLE IF EXISTS `cong_thuc_cho_an`;
 CREATE TABLE `cong_thuc_cho_an` (
   `ma_cong_thuc` varchar(50) NOT NULL,
   `ti_le_cho_an` float DEFAULT NULL,
   `thong_tin_bo_sung` text,
   PRIMARY KEY (`ma_cong_thuc`)
 );
-
+DROP TABLE IF EXISTS `rule_dieu_khien`;
 CREATE TABLE `rule_dieu_khien` (
   `ma_rule` varchar(50) NOT NULL,
   `ma_cam_bien` varchar(50) NOT NULL,
@@ -105,7 +109,7 @@ CREATE TABLE `rule_dieu_khien` (
   FOREIGN KEY (`ma_cam_bien`) REFERENCES `cam_bien`(`ma_thiet_bi`) ON DELETE CASCADE,
   FOREIGN KEY (`ma_tb_dieu_khien`) REFERENCES `thiet_bi_dieu_khien`(`ma_thiet_bi`) ON DELETE CASCADE
 );
-
+DROP TABLE IF EXISTS `du_lieu_quan_trac`;
 CREATE TABLE `du_lieu_quan_trac` (
   `ma_du_lieu` bigint NOT NULL AUTO_INCREMENT,
   `ma_cam_bien` varchar(50) NOT NULL,
@@ -114,7 +118,7 @@ CREATE TABLE `du_lieu_quan_trac` (
   PRIMARY KEY (`ma_du_lieu`),
   FOREIGN KEY (`ma_cam_bien`) REFERENCES `cam_bien`(`ma_thiet_bi`) ON DELETE CASCADE
 );
-
+DROP TABLE IF EXISTS `ghi_chep_cho_an`;
 CREATE TABLE `ghi_chep_cho_an` (
   `ma_ghi_chep` int NOT NULL AUTO_INCREMENT,
   `ma_cong_thuc` varchar(50) DEFAULT NULL,
@@ -125,6 +129,23 @@ CREATE TABLE `ghi_chep_cho_an` (
   PRIMARY KEY (`ma_ghi_chep`),
   FOREIGN KEY (`ma_cong_thuc`) REFERENCES `cong_thuc_cho_an`(`ma_cong_thuc`) ON DELETE SET NULL,
   FOREIGN KEY (`ma_tb_dieu_khien`) REFERENCES `thiet_bi_dieu_khien`(`ma_thiet_bi`) ON DELETE CASCADE
+);
+
+DROP TABLE IF EXISTS `alert_trang_thai`;
+CREATE TABLE `alert_trang_thai` (
+  `ma_thiet_bi` varchar(50) NOT NULL,
+  `alert_kind` varchar(30) NOT NULL,
+  `is_active` tinyint(1) NOT NULL DEFAULT '0',
+  `previous_value` float DEFAULT NULL,
+  `last_sensor_value` float DEFAULT NULL,
+  `last_seen_at` datetime DEFAULT NULL,
+  `last_alert_id` bigint DEFAULT NULL,
+  `resolved_at` datetime DEFAULT NULL,
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`ma_thiet_bi`,`alert_kind`),
+  KEY `idx_alert_kind` (`alert_kind`),
+  FOREIGN KEY (`ma_thiet_bi`) REFERENCES `cam_bien`(`ma_thiet_bi`) ON DELETE CASCADE
 );
 
 INSERT INTO `nguoi_dung` VALUES
@@ -163,7 +184,7 @@ INSERT INTO `khu_vuc` VALUES
 ('KV_01','USR_QL01','Tôm Thẻ Chân Trắng');
 
 INSERT INTO `ao_nuoi` VALUES
-('AO_01','KV_01',1000,'AUTO');
+('AO_01','KV_01',1000,'AUTO',NULL);
 
 INSERT INTO `tram_bien` VALUES
 ('TRAM_AO_01','AO_01','CONNECTED');

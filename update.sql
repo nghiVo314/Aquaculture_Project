@@ -185,8 +185,14 @@ INSERT IGNORE INTO cong_thuc_cho_an (ma_cong_thuc, ti_le_cho_an, thong_tin_bo_su
 ('CT_NOON', 1.5, 'Khẩu phần buổi trưa'),
 ('CT_EVENING', 1.1, 'Khẩu phần buổi chiều');
 
-INSERT IGNORE INTO lich_trinh (ma_lich_trinh, ma_tb_dieu_khien, thoi_gian_bat_dau, thoi_gian_ket_thuc, ma_cong_thuc) VALUES
-(9001, 'DK_FEEDER_AO_02', '06:00:00', '06:20:00', 'CT_MORNING'),
-(9002, 'DK_FEEDER_AO_02', '12:00:00', '12:20:00', 'CT_NOON'),
-(9003, 'DK_FEEDER_AO_02', '18:00:00', '18:20:00', 'CT_EVENING');
+INSERT INTO lich_trinh (ma_lich_trinh, ma_tb_dieu_khien, thoi_gian_bat_dau, thoi_gian_ket_thuc, ma_cong_thuc) 
+VALUES 
+(9001, 'DK_FEEDER_AO_02', '06:00:00', '06:20:00', 'CT_MORNING'), 
+(9002, 'DK_FEEDER_AO_02', '12:00:00', '12:20:00', 'CT_NOON'), 
+(9003, 'DK_FEEDER_AO_02', '18:00:00', '18:20:00', 'CT_EVENING')
+ON DUPLICATE KEY UPDATE 
+ma_tb_dieu_khien = VALUES(ma_tb_dieu_khien),
+thoi_gian_bat_dau = VALUES(thoi_gian_bat_dau),
+thoi_gian_ket_thuc = VALUES(thoi_gian_ket_thuc),
+ma_cong_thuc = VALUES(ma_cong_thuc);
 

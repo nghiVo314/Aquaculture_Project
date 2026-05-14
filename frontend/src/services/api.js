@@ -39,9 +39,23 @@ export const registerApi = ({ TenDangNhap, MatKhau, RoleName }) =>
 
 export const getDashboardSummary = () => request('/dashboard/summary');
 export const getLatestSensors = () => request('/sensors/latest');
-export const getAlerts = (status = '') => request(`/alerts${status ? `?status=${status}` : ''}`);
-export const getPondAlerts = (pondId, status = 'unacknowledged') =>
-    request(`/alerts?pond_id=${encodeURIComponent(pondId)}${status ? `&status=${status}` : ''}`);
+export const getAlerts = (status = '', options = {}) => {
+    const params = new URLSearchParams();
+    if (status) params.set('status', status);
+    if (options.pondId) params.set('pond_id', options.pondId);
+    if (options.sort) params.set('sort', options.sort);
+    if (options.days) params.set('days', String(options.days));
+    const query = params.toString();
+    return request(`/alerts${query ? `?${query}` : ''}`);
+};
+export const getPondAlerts = (pondId, status = 'unacknowledged', options = {}) => {
+    const params = new URLSearchParams();
+    params.set('pond_id', pondId);
+    if (status) params.set('status', status);
+    if (options.sort) params.set('sort', options.sort);
+    if (options.days) params.set('days', String(options.days));
+    return request(`/alerts?${params.toString()}`);
+};
 export const acknowledgeAlert = (logId, userId) =>
     request(`/alerts/${logId}/ack`, {
         method: 'PUT',
@@ -71,6 +85,8 @@ export const getSystemLogs = () => request('/logs');
 // Cấu hình Ao (Luật tự động)
 export const getPondConfig = (aoId) => request(`/ponds/${aoId}/config`);
 
+export const getThresholdHistory = (aoId) => request(`/ponds/${aoId}/config/history`);
+
 export const updatePondConfig = (aoId, payload) =>
     request(`/ponds/${aoId}/config`, {
         method: 'PUT',
@@ -86,6 +102,26 @@ export const updateDeviceStatus = (deviceId, trang_thai) =>
 
 // Quản lý User
 export const getUsers = () => request('/users');
+
+export const getManagers = () => request('/users/managers');
+export const getWorkers = () => request('/users/workers');
+export const getWorkerWorkload = () => request('/users/workers/workload/stats');
+
+export const getPondWorkers = (pondId) => request(`/ponds/${pondId}/workers`);
+export const addPondWorker = (pondId, payload) =>
+    request(`/ponds/${pondId}/workers`, {
+        method: 'POST',
+        body: JSON.stringify(payload)
+    });
+export const removePondWorker = (pondId, workerId) =>
+    request(`/ponds/${pondId}/workers/${workerId}`, {
+        method: 'DELETE'
+    });
+export const updatePondWorkerRole = (pondId, workerId, payload) =>
+    request(`/ponds/${pondId}/workers/${workerId}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload)
+    });
 
 export const updateUserAreas = (userId, khuvuc_ids) =>
     request(`/users/${userId}/areas`, {

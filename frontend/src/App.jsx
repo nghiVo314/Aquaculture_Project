@@ -8,6 +8,7 @@ import LogsPage from './pages/LogsPage';
 // import ManagementPage from './pages/ManagementPage';
 import RegisterPage from './pages/RegisterPage';
 // import ControlPanelPage from './pages/ControlPanelPage';
+import AlertsPage from './pages/AlertsPageNew';
 
 // Import các trang MỚI BỔ SUNG
 import UserManagementPage from './pages/UserManagementPage';
@@ -68,6 +69,7 @@ const AppRoutes = () => {
         <Route index element={<DashboardPage />} />
         {/* ROUTE MỚI: Danh sách ao của một khu vực */}
         <Route path="khu-vuc/:zoneId/ao" element={<ZonePondsPage />} />
+        <Route path="alerts" element={<AlertsPage />} />
         <Route path="logs" element={<LogsPage />} />
         {/* <Route path="control" element={<ControlPanelPage />} />
         <Route path="schedules" element={<SchedulePage />} /> */}

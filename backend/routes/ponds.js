@@ -5,12 +5,133 @@ const { requireAuth, requirePermission } = require('../middlewares/rbac');
 //flag khi có thây đổi
 let needsReload = false;
 
+async function checkPondOwnership(connection, pondId, userId) {
+    const [result] = await connection.execute(`
+        SELECT a.ma_ao_nuoi
+        FROM ao_nuoi a
+        JOIN khu_vuc k ON a.ma_khu_vuc = k.ma_khu_vuc
+        WHERE a.ma_ao_nuoi = ?
+          AND k.ma_nguoi_dung_quan_ly = ?
+        LIMIT 1
+    `, [pondId, userId]);
+
+    if (result.length === 0) {
+        return {
+            authorized: false,
+            errorMessage: 'Bạn không có quyền sửa cấu hình ao này (ao không thuộc khu vực quản lý của bạn)'
+        };
+    }
+
+    return { authorized: true };
+}
+
+async function ensureThresholdHistoryTable(connection = db) {
+    await connection.execute(`
+        CREATE TABLE IF NOT EXISTS lich_su_chinh_nguong (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            ma_ao_nuoi VARCHAR(50) NOT NULL,
+            ma_rule VARCHAR(50) NOT NULL,
+            loai_cam_bien VARCHAR(50) NOT NULL,
+            ma_cam_bien VARCHAR(50) NOT NULL,
+            ma_tb_dieu_khien VARCHAR(50) NOT NULL,
+            vi_tri_thiet_bi VARCHAR(100) NOT NULL,
+            mo_ta VARCHAR(255) NOT NULL,
+            nguoi_sua VARCHAR(100) NOT NULL,
+            da_sua TINYINT(1) NOT NULL DEFAULT 1,
+            min_value DECIMAL(10,2) NOT NULL,
+            max_value DECIMAL(10,2) NOT NULL,
+            thoi_gian TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_ao_thoi_gian (ma_ao_nuoi, thoi_gian),
+            INDEX idx_rule (ma_rule)
+        )
+    `);
+
+    const [columns] = await connection.execute(
+        `SELECT COLUMN_NAME
+         FROM INFORMATION_SCHEMA.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME = 'lich_su_chinh_nguong'`
+    );
+    const existingColumns = new Set(columns.map((row) => row.COLUMN_NAME));
+
+    const columnDefinitions = [
+        ['ma_rule', 'VARCHAR(50) NULL DEFAULT NULL'],
+        ['loai_cam_bien', 'VARCHAR(50) NULL DEFAULT NULL'],
+        ['ma_cam_bien', 'VARCHAR(50) NULL DEFAULT NULL'],
+        ['ma_tb_dieu_khien', 'VARCHAR(50) NULL DEFAULT NULL'],
+        ['vi_tri_thiet_bi', 'VARCHAR(100) NULL DEFAULT NULL'],
+        ['mo_ta', 'VARCHAR(255) NULL DEFAULT NULL'],
+        ['nguoi_sua', 'VARCHAR(100) NULL DEFAULT NULL'],
+        ['da_sua', 'TINYINT(1) NOT NULL DEFAULT 1'],
+        ['min_value', 'DECIMAL(10,2) NULL DEFAULT NULL'],
+        ['max_value', 'DECIMAL(10,2) NULL DEFAULT NULL'],
+        ['thoi_gian', 'TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP']
+    ];
+
+    for (const [columnName, definition] of columnDefinitions) {
+        if (!existingColumns.has(columnName)) {
+            await connection.execute(`ALTER TABLE lich_su_chinh_nguong ADD COLUMN ${columnName} ${definition}`);
+        }
+    }
+}
+
+async function ensurePondWorkerColumn(connection = db) {
+    const [columns] = await connection.execute(
+        `SELECT COLUMN_NAME
+         FROM INFORMATION_SCHEMA.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME = 'ao_nuoi'`
+    );
+    const existingColumns = new Set(columns.map((row) => row.COLUMN_NAME));
+
+    if (!existingColumns.has('ma_nguoi_dung_phu_trach')) {
+        await connection.execute(
+            `ALTER TABLE ao_nuoi ADD COLUMN ma_nguoi_dung_phu_trach varchar(50) DEFAULT NULL`
+        );
+    }
+
+    const [keys] = await connection.execute(
+        `SELECT CONSTRAINT_NAME, COLUMN_NAME, REFERENCED_TABLE_NAME
+         FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME = 'ao_nuoi'
+           AND COLUMN_NAME = 'ma_nguoi_dung_phu_trach'`
+    );
+    const hasForeignKey = keys.some((row) => row.REFERENCED_TABLE_NAME === 'nguoi_dung');
+
+    if (!hasForeignKey) {
+        try {
+            await connection.execute(
+                `ALTER TABLE ao_nuoi
+                 ADD CONSTRAINT ao_nuoi_ibfk_worker
+                 FOREIGN KEY (ma_nguoi_dung_phu_trach) REFERENCES nguoi_dung (ma_nguoi_dung) ON DELETE SET NULL`
+            );
+        } catch (error) {
+            if (!String(error.message || '').includes('Duplicate foreign key constraint')) {
+                throw error;
+            }
+        }
+    }
+
+    try {
+        await connection.execute(
+            `ALTER TABLE ao_nuoi ADD UNIQUE KEY uniq_ao_worker (ma_nguoi_dung_phu_trach)`
+        );
+    } catch (error) {
+        if (!String(error.message || '').includes('Duplicate key name')) {
+            throw error;
+        }
+    }
+}
+
 router.get('/', requireAuth, async (req, res) => {
     try {
+        await ensurePondWorkerColumn(db);
         const [rows] = await db.execute(`
-            SELECT a.*, t.ma_tram, t.trang_thai_cloud 
+            SELECT a.*, t.ma_tram, t.trang_thai_cloud, nd.ten_dang_nhap AS nguoi_phu_trach
             FROM ao_nuoi a
             LEFT JOIN tram_bien t ON a.ma_ao_nuoi = t.ma_ao_nuoi
+            LEFT JOIN nguoi_dung nd ON nd.ma_nguoi_dung = a.ma_nguoi_dung_phu_trach
         `);
         res.json(rows);
     } catch (error) {
@@ -20,76 +141,87 @@ router.get('/', requireAuth, async (req, res) => {
 
 // THÊM AO - Chỉ dành cho user có quyền 'pond:create'
 router.post('/', requireAuth, requirePermission('pond:create'), async (req, res) => {
-    const { ma_ao_nuoi, ma_khu_vuc, dien_tich } = req.body; 
+    let { ma_ao_nuoi, ma_khu_vuc, dien_tich, ma_nguoi_dung_phu_trach } = req.body; 
     const connection = await db.getConnection(); // Sử dụng connection riêng để dùng Transaction
     
     try {
+        await ensurePondWorkerColumn(connection);
+        const safeZoneId = String(ma_khu_vuc || '').trim();
+        const safeArea = Number(dien_tich);
+        const safeWorkerId = ma_nguoi_dung_phu_trach ? String(ma_nguoi_dung_phu_trach).trim() : null;
+
+        if (!safeZoneId) {
+            return res.status(400).json({ status: 'error', message: 'Thiếu mã khu vực' });
+        }
+
+        if (!Number.isFinite(safeArea) || safeArea <= 0) {
+            return res.status(400).json({ status: 'error', message: 'Diện tích ao không hợp lệ' });
+        }
+
+        if (safeWorkerId) {
+            const [workerRows] = await connection.execute(
+                `SELECT u.ma_nguoi_dung
+                 FROM nguoi_dung u
+                 INNER JOIN nguoi_dung_role ur ON ur.ma_nguoi_dung = u.ma_nguoi_dung
+                 INNER JOIN role r ON r.ma_role = ur.ma_role
+                 WHERE u.ma_nguoi_dung = ? AND (r.ma_role = 'worker' OR LOWER(r.role_name) LIKE '%công nhân%')
+                 LIMIT 1`,
+                [safeWorkerId]
+            );
+            if (workerRows.length === 0) {
+                return res.status(400).json({ status: 'error', message: 'Người phụ trách phải là worker hợp lệ' });
+            }
+
+            const [existingWorkerPond] = await connection.execute(
+                `SELECT ma_ao_nuoi FROM ao_nuoi WHERE ma_nguoi_dung_phu_trach = ? LIMIT 1`,
+                [safeWorkerId]
+            );
+            if (existingWorkerPond.length > 0) {
+                return res.status(409).json({
+                    status: 'error',
+                    message: `Worker này đã phụ trách ao ${existingWorkerPond[0].ma_ao_nuoi}. Mỗi worker chỉ được gán 1 ao.`
+                });
+            }
+        }
+
         await connection.beginTransaction();
 
         // 1. Kiểm tra giới hạn ao
         const [result] = await connection.execute(
             'SELECT COUNT(*) as total FROM ao_nuoi WHERE ma_khu_vuc = ?', 
-            [ma_khu_vuc]
+            [safeZoneId]
         );
         if (result[0].total >= 10) {
             await connection.rollback();
             return res.status(400).json({ status: 'error', message: 'Khu vực này đã đạt tối đa 10 ao nuôi!' });
         }
 
-        // 2. Thêm ao nuôi
+        // 2. Thêm ao nuôi theo mã khu vực + số thứ tự tăng dần: KV3_A001, KV3_A002...
+        if (!ma_ao_nuoi) {
+            const zonePrefix = safeZoneId.replace(/[^a-zA-Z0-9]/g, '');
+            const [[row]] = await connection.execute(
+                `SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(ma_ao_nuoi, 'A', -1) AS UNSIGNED)), 0) as maxid
+                 FROM ao_nuoi
+                 WHERE ma_khu_vuc = ?`,
+                [safeZoneId]
+            );
+            const nextId = (row.maxid || 0) + 1;
+            ma_ao_nuoi = `${zonePrefix}_A${String(nextId).padStart(3, '0')}`;
+        }
+
+        const safePondId = String(ma_ao_nuoi || '').trim();
+
         await connection.execute(
-            'INSERT INTO ao_nuoi (ma_ao_nuoi, ma_khu_vuc, dien_tich) VALUES (?, ?, ?)',
-            [ma_ao_nuoi, ma_khu_vuc, dien_tich]
+            'INSERT INTO ao_nuoi (ma_ao_nuoi, ma_khu_vuc, dien_tich, ma_nguoi_dung_phu_trach) VALUES (?, ?, ?, ?)',
+            [safePondId, safeZoneId, safeArea, safeWorkerId]
         );
 
         // 3. Tự động tạo 1 Trạm (Gateway) cho ao này
-        const ma_tram = `TRAM_${ma_ao_nuoi}`;
+        const ma_tram = `TRAM_${safePondId}`;
         await connection.execute(
             'INSERT INTO tram_bien (ma_tram, ma_ao_nuoi, trang_thai_cloud) VALUES (?, ?, ?)',
-            [ma_tram, ma_ao_nuoi, 'CONNECTED']
+            [ma_tram, safePondId, 'CONNECTED']
         );
-
-        // 4. Khởi tạo danh sách Cảm biến (DO, PH, TEMP)
-        const sensors = [
-            // { id: `CB_DO_${ma_ao_nuoi}`, type: 'DO' },
-            // { id: `CB_PH_${ma_ao_nuoi}`, type: 'PH' },
-            { id: `CB_TEMP_${ma_ao_nuoi}`, type: 'TEMP' },
-            { id: `CB_LIGHT_${ma_ao_nuoi}`, type: 'LIGHT' }
-        ];
-
-        for (let s of sensors) {
-            await connection.execute('INSERT INTO thiet_bi_tai_bien (ma_thiet_bi, ma_tram, loai_phan_loai, trang_thai) VALUES (?, ?, ?, ?)', [s.id, ma_tram, 'CAM_BIEN', 'TAT']);
-            await connection.execute('INSERT INTO cam_bien (ma_thiet_bi, loai_cam_bien) VALUES (?, ?)', [s.id, s.type]);
-        }
-
-        // 5. Khởi tạo danh sách Thiết bị điều khiển (AERATOR, PUMP, FAN, FEEDER)
-        const actuators = [
-            //{ id: `DK_AERATOR_${ma_ao_nuoi}`, type: 'AERATOR' },
-            { id: `DK_PUMP_${ma_ao_nuoi}`, type: 'PUMP' },
-            { id: `DK_FAN_${ma_ao_nuoi}`, type: 'FAN' },
-            { id: `DK_FEEDER_${ma_ao_nuoi}`, type: 'FEEDER' } 
-        ];
-
-        for (let a of actuators) {
-            await connection.execute('INSERT INTO thiet_bi_tai_bien (ma_thiet_bi, ma_tram, loai_phan_loai, trang_thai) VALUES (?, ?, ?, ?)', [a.id, ma_tram, 'DIEU_KHIEN', 'TAT']);
-            await connection.execute('INSERT INTO thiet_bi_dieu_khien (ma_thiet_bi, loai_thiet_bi) VALUES (?, ?)', [a.id, a.type]);
-        }
-
-        // 6. Khởi tạo Rule mặc định nối Cảm biến với Thiết bị điều khiển
-        // Giả định: DO -> AERATOR, PH -> PUMP, TEMP -> FAN
-        const rules = [
-            // { id: `RULE_DO_${ma_ao_nuoi}`, cb: `CB_DO_${ma_ao_nuoi}`, dk: `DK_AERATOR_${ma_ao_nuoi}`, min: 5.0, max: 7.0 },
-            // { id: `RULE_PH_${ma_ao_nuoi}`, cb: `CB_PH_${ma_ao_nuoi}`, dk: `DK_PUMP_${ma_ao_nuoi}`, min: 5.0, max: 8.0 },
-            { id: `RULE_TEMP_${ma_ao_nuoi}`, cb: `CB_TEMP_${ma_ao_nuoi}`, dk: `DK_FAN_${ma_ao_nuoi}`, min: 25.0, max: 28.0 },
-            { id: `RULE_LIGHT_${ma_ao_nuoi}`, cb: `CB_LIGHT_${ma_ao_nuoi}`, dk: `DK_FEEDER_${ma_ao_nuoi}`, min: 9.0, max: 40.0 }
-        ];
-
-        for (let r of rules) {
-            await connection.execute(
-                'INSERT INTO rule_dieu_khien (ma_rule, ma_cam_bien, ma_tb_dieu_khien, min_value, max_value) VALUES (?, ?, ?, ?, ?)',
-                [r.id, r.cb, r.dk, r.min, r.max]
-            );
-        }
 
         await connection.commit();
         needsReload = true; //bật cờ sau khi add ao
@@ -107,6 +239,7 @@ router.post('/', requireAuth, requirePermission('pond:create'), async (req, res)
 // GET config for Gateway (Lấy ngưỡng hiện tại của ao để gửi cho main.py)
 router.get('/:ao_id/config', async (req, res) => {
     try {
+        await ensurePondWorkerColumn(db);
 
         const [[pond]] = await db.execute(
             `SELECT che_do
@@ -149,34 +282,156 @@ router.get('/:ao_id/config', async (req, res) => {
 // SỬA CẤU HÌNH AO - Chỉ dành cho user có quyền 'pond:update:config'
 router.put('/:ao_id/config', requireAuth, requirePermission('pond:update:config'), async (req, res) => {
     const { LoaiCamBien, min_value, max_value } = req.body;
+    const connection = await db.getConnection();
     try {
-        // Cập nhật bảng rule_dieu_khien dựa trên mã ao và loại cảm biến
-        const [result] = await db.execute(
-            `UPDATE rule_dieu_khien r
+        await ensureThresholdHistoryTable(connection);
+        const ownershipCheck = await checkPondOwnership(connection, req.params.ao_id, req.user.id);
+        if (!ownershipCheck.authorized) {
+            return res.status(403).json({
+                status: 'error',
+                message: ownershipCheck.errorMessage
+            });
+        }
+
+        await connection.beginTransaction();
+
+        // Lấy rule hiện tại để cập nhật và ghi lịch sử cùng lúc
+        const [matchedRules] = await connection.execute(
+            `SELECT r.ma_rule, cb.loai_cam_bien, cb.ma_thiet_bi AS ma_cam_bien,
+                    dk.ma_thiet_bi AS ma_tb_dieu_khien, dk.loai_thiet_bi,
+                    tb.ma_tram
+             FROM rule_dieu_khien r
              JOIN cam_bien cb ON r.ma_cam_bien = cb.ma_thiet_bi
              JOIN thiet_bi_tai_bien tbtb ON cb.ma_thiet_bi = tbtb.ma_thiet_bi
              JOIN tram_bien tb ON tbtb.ma_tram = tb.ma_tram
-             SET r.min_value = ?, r.max_value = ?
-             WHERE tb.ma_ao_nuoi = ? AND cb.loai_cam_bien = ?`,
-            [min_value, max_value, req.params.ao_id, LoaiCamBien]
+             LEFT JOIN thiet_bi_dieu_khien dk ON r.ma_tb_dieu_khien = dk.ma_thiet_bi
+             WHERE tb.ma_ao_nuoi = ? AND cb.loai_cam_bien = ?
+             LIMIT 1`,
+            [req.params.ao_id, LoaiCamBien]
+        );
+
+        if (matchedRules.length === 0) {
+            await connection.rollback();
+            return res.status(404).json({ status: 'error', message: 'Không tìm thấy rule cho cảm biến này trong ao' });
+        }
+
+        const rule = matchedRules[0];
+        const actorName = req.user?.username || req.user?.TenDangNhap || req.user?.id || 'system';
+        const deviceName = rule.loai_thiet_bi || rule.ma_tb_dieu_khien;
+        const deviceLocation = rule.ma_tram || 'unknown';
+        const description = `${rule.loai_cam_bien} đổi ngưỡng từ ${Number(rule.min_value || 0)}-${Number(rule.max_value || 0)} sang ${Number(min_value)}-${Number(max_value)}`;
+
+        // Cập nhật rule
+        const [result] = await connection.execute(
+            `UPDATE rule_dieu_khien
+             SET min_value = ?, max_value = ?
+             WHERE ma_rule = ?`,
+            [min_value, max_value, rule.ma_rule]
         );
         
         if (result.affectedRows === 0) {
+            await connection.rollback();
             return res.status(404).json({ status: 'error', message: 'Không tìm thấy rule cho cảm biến này trong ao' });
         }
+
+        await connection.execute(
+            `INSERT INTO lich_su_chinh_nguong
+                (ma_ao_nuoi, ma_rule, loai_cam_bien, ma_cam_bien, ma_tb_dieu_khien, vi_tri_thiet_bi, mo_ta, nguoi_sua, da_sua, min_value, max_value)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+            [
+                req.params.ao_id,
+                rule.ma_rule,
+                rule.loai_cam_bien,
+                rule.ma_cam_bien,
+                rule.ma_tb_dieu_khien,
+                deviceLocation,
+                description,
+                actorName,
+                min_value,
+                max_value
+            ]
+        );
+
+        await connection.commit();
         res.json({ status: 'updated' });
     } catch (error) {
+        try { await connection.rollback(); } catch (_) {}
         res.status(500).json({ error: error.message });
+    } finally {
+        connection.release();
+    }
+});
+
+// Lấy lịch sử chỉnh ngưỡng của ao
+router.get('/:ao_id/config/history', requireAuth, async (req, res) => {
+    const connection = await db.getConnection();
+    try {
+        await ensureThresholdHistoryTable(connection);
+
+        const [rows] = await connection.execute(
+            `SELECT
+                id,
+                ma_ao_nuoi,
+                ma_rule,
+                loai_cam_bien,
+                ma_cam_bien,
+                ma_tb_dieu_khien,
+                vi_tri_thiet_bi,
+                mo_ta,
+                nguoi_sua,
+                da_sua,
+                min_value,
+                max_value,
+                thoi_gian
+             FROM lich_su_chinh_nguong
+             WHERE ma_ao_nuoi = ?
+             ORDER BY thoi_gian DESC, id DESC`,
+            [req.params.ao_id]
+        );
+
+        res.json(rows);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    } finally {
+        connection.release();
     }
 });
 
 // CẬP NHẬT THÔNG TIN AO - Chỉ dành cho user có quyền 'pond:update'
 router.put('/:id', requireAuth, requirePermission('pond:update'), async (req, res) => {
-    const { dien_tich } = req.body;
+    const { dien_tich, ma_nguoi_dung_phu_trach } = req.body;
     try {
+        await ensurePondWorkerColumn(db);
+        const safeWorkerId = ma_nguoi_dung_phu_trach ? String(ma_nguoi_dung_phu_trach).trim() : null;
+        if (safeWorkerId) {
+            const [workerRows] = await db.execute(
+                `SELECT u.ma_nguoi_dung
+                 FROM nguoi_dung u
+                 INNER JOIN nguoi_dung_role ur ON ur.ma_nguoi_dung = u.ma_nguoi_dung
+                 INNER JOIN role r ON r.ma_role = ur.ma_role
+                 WHERE u.ma_nguoi_dung = ? AND (r.ma_role = 'worker' OR LOWER(r.role_name) LIKE '%công nhân%')
+                 LIMIT 1`,
+                [safeWorkerId]
+            );
+            if (workerRows.length === 0) {
+                return res.status(400).json({ status: 'error', message: 'Người phụ trách phải là worker hợp lệ' });
+            }
+
+            const [existingWorkerPond] = await db.execute(
+                `SELECT ma_ao_nuoi FROM ao_nuoi WHERE ma_nguoi_dung_phu_trach = ? AND ma_ao_nuoi <> ? LIMIT 1`,
+                [safeWorkerId, req.params.id]
+            );
+            if (existingWorkerPond.length > 0) {
+                return res.status(409).json({
+                    status: 'error',
+                    message: `Worker này đã phụ trách ao ${existingWorkerPond[0].ma_ao_nuoi}. Mỗi worker chỉ được gán 1 ao.`
+                });
+            }
+        }
+
         await db.execute(
-            'UPDATE ao_nuoi SET dien_tich = ? WHERE ma_ao_nuoi = ?',
-            [dien_tich, req.params.id]
+            'UPDATE ao_nuoi SET dien_tich = ?, ma_nguoi_dung_phu_trach = ? WHERE ma_ao_nuoi = ?',
+            [dien_tich, safeWorkerId, req.params.id]
         );
         res.json({ status: 'updated', message: 'Cập nhật ao thành công' });
     } catch (error) {
@@ -385,4 +640,137 @@ router.get('/sensor-report', async (req, res) => {
     }
 });
 
-module.exports = router;;
+// GET workers for a pond
+router.get('/:pond_id/workers', requireAuth, async (req, res) => {
+    try {
+        const [workers] = await db.execute(`
+            SELECT
+                u.ma_nguoi_dung,
+                u.ten_dang_nhap,
+                COALESCE(aow.vai_tro, 'PRIMARY') AS vai_tro,
+                aow.ngay_tao
+            FROM ao_nuoi_workers aow
+            JOIN nguoi_dung u ON aow.ma_nguoi_dung = u.ma_nguoi_dung
+            WHERE aow.ma_ao_nuoi = ?
+            ORDER BY aow.vai_tro, u.ten_dang_nhap
+        `, [req.params.pond_id]);
+
+        res.json(workers);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// POST: assign worker to pond
+router.post('/:pond_id/workers', requireAuth, requirePermission('pond:manage:workers'), async (req, res) => {
+    const { ma_nguoi_dung, vai_tro } = req.body;
+    const connection = await db.getConnection();
+
+    try {
+        if (!ma_nguoi_dung) {
+            return res.status(400).json({ error: 'Thiếu ma_nguoi_dung' });
+        }
+
+        const ownershipCheck = await checkPondOwnership(connection, req.params.pond_id, req.user.id);
+        if (!ownershipCheck.authorized) {
+            return res.status(403).json({ status: 'error', message: ownershipCheck.errorMessage });
+        }
+
+        const [workerCheck] = await connection.execute(`
+            SELECT u.ma_nguoi_dung
+            FROM nguoi_dung u
+            INNER JOIN nguoi_dung_role ur ON ur.ma_nguoi_dung = u.ma_nguoi_dung
+            INNER JOIN role r ON r.ma_role = ur.ma_role
+            WHERE u.ma_nguoi_dung = ?
+              AND (r.ma_role = 'worker' OR LOWER(r.role_name) LIKE '%công nhân%')
+            LIMIT 1
+        `, [ma_nguoi_dung]);
+
+        if (workerCheck.length === 0) {
+            return res.status(400).json({ error: 'Người này không có vai trò Worker' });
+        }
+
+        const [existing] = await connection.execute(`
+            SELECT id FROM ao_nuoi_workers
+            WHERE ma_ao_nuoi = ? AND ma_nguoi_dung = ?
+        `, [req.params.pond_id, ma_nguoi_dung]);
+
+        if (existing.length > 0) {
+            return res.status(409).json({ error: 'Worker này đã được gán vào ao' });
+        }
+
+        await connection.execute(`
+            INSERT INTO ao_nuoi_workers (ma_ao_nuoi, ma_nguoi_dung, vai_tro)
+            VALUES (?, ?, ?)
+        `, [req.params.pond_id, ma_nguoi_dung, vai_tro || 'PRIMARY']);
+
+        res.json({ status: 'success', message: 'Đã gán worker cho ao' });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    } finally {
+        connection.release();
+    }
+});
+
+// DELETE: remove worker from pond
+router.delete('/:pond_id/workers/:worker_id', requireAuth, requirePermission('pond:manage:workers'), async (req, res) => {
+    const connection = await db.getConnection();
+
+    try {
+        const ownershipCheck = await checkPondOwnership(connection, req.params.pond_id, req.user.id);
+        if (!ownershipCheck.authorized) {
+            return res.status(403).json({ status: 'error', message: ownershipCheck.errorMessage });
+        }
+
+        const [result] = await connection.execute(`
+            DELETE FROM ao_nuoi_workers
+            WHERE ma_ao_nuoi = ? AND ma_nguoi_dung = ?
+        `, [req.params.pond_id, req.params.worker_id]);
+
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ error: 'Không tìm thấy worker assignment' });
+        }
+
+        res.json({ status: 'success', message: 'Đã xóa worker khỏi ao' });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    } finally {
+        connection.release();
+    }
+});
+
+// PUT: update worker role on pond
+router.put('/:pond_id/workers/:worker_id', requireAuth, requirePermission('pond:manage:workers'), async (req, res) => {
+    const { vai_tro } = req.body;
+    const connection = await db.getConnection();
+
+    try {
+        if (!vai_tro || !['PRIMARY', 'MAINTENANCE', 'ASSISTANT'].includes(vai_tro)) {
+            return res.status(400).json({ error: 'Vai trò không hợp lệ (PRIMARY, MAINTENANCE, ASSISTANT)' });
+        }
+
+        const ownershipCheck = await checkPondOwnership(connection, req.params.pond_id, req.user.id);
+        if (!ownershipCheck.authorized) {
+            return res.status(403).json({ status: 'error', message: ownershipCheck.errorMessage });
+        }
+
+        const [result] = await connection.execute(`
+            UPDATE ao_nuoi_workers
+            SET vai_tro = ?
+            WHERE ma_ao_nuoi = ? AND ma_nguoi_dung = ?
+        `, [vai_tro, req.params.pond_id, req.params.worker_id]);
+
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ error: 'Không tìm thấy worker assignment' });
+        }
+
+        res.json({ status: 'success', message: 'Đã cập nhật vai trò worker' });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    } finally {
+        connection.release();
+    }
+});
+
+module.exports = router;
+module.exports.ensurePondWorkerColumn = ensurePondWorkerColumn;

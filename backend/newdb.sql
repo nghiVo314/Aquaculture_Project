@@ -27,8 +27,12 @@ CREATE TABLE `ao_nuoi` (
   `ma_khu_vuc` varchar(50) NOT NULL,
   `dien_tich` float DEFAULT NULL,
   `che_do` enum('AUTO','MANUAL') DEFAULT 'AUTO',
+  `ma_nguoi_dung_phu_trach` varchar(50) DEFAULT NULL,
   PRIMARY KEY (`ma_ao_nuoi`),
   KEY `ma_khu_vuc` (`ma_khu_vuc`),
+  UNIQUE KEY `uniq_ao_worker` (`ma_nguoi_dung_phu_trach`),
+  KEY `ma_nguoi_dung_phu_trach` (`ma_nguoi_dung_phu_trach`),
+  CONSTRAINT `ao_nuoi_ibfk_worker` FOREIGN KEY (`ma_nguoi_dung_phu_trach`) REFERENCES `nguoi_dung` (`ma_nguoi_dung`) ON DELETE SET NULL,
   CONSTRAINT `ao_nuoi_ibfk_1` FOREIGN KEY (`ma_khu_vuc`) REFERENCES `khu_vuc` (`ma_khu_vuc`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
@@ -39,7 +43,7 @@ CREATE TABLE `ao_nuoi` (
 
 LOCK TABLES `ao_nuoi` WRITE;
 /*!40000 ALTER TABLE `ao_nuoi` DISABLE KEYS */;
-INSERT INTO `ao_nuoi` VALUES ('AO_01','KV_01',1000,'AUTO');
+INSERT INTO `ao_nuoi` VALUES ('AO_01','KV_01',1000,'AUTO',NULL);
 /*!40000 ALTER TABLE `ao_nuoi` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -240,6 +244,30 @@ LOCK TABLES `log_he_thong` WRITE;
 INSERT INTO `log_he_thong` VALUES (1,'USR_ADMIN','LOGIN',NULL,1,'Người dùng đăng nhập thành công','2026-03-23 15:35:24'),(2,'USR_ADMIN','LOGIN',NULL,1,'Người dùng đăng nhập thành công','2026-04-14 10:27:10'),(3,'USR_ADMIN','LOGIN',NULL,1,'Người dùng đăng nhập thành công','2026-04-14 19:54:12'),(4,'USR_ADMIN','LOGIN',NULL,1,'Người dùng đăng nhập thành công','2026-04-14 22:20:52'),(5,'USR_ADMIN','LOGIN',NULL,1,'Người dùng đăng nhập thành công','2026-04-15 10:11:53'),(6,'USR_ADMIN','LOGIN',NULL,1,'Người dùng đăng nhập thành công','2026-04-15 10:35:02'),(7,'USR_ADMIN','LOGIN',NULL,1,'Người dùng đăng nhập thành công','2026-04-15 10:37:18'),(8,'USR_ADMIN','LOGIN',NULL,1,'Người dùng đăng nhập thành công','2026-04-15 10:52:47'),(9,'USR_ADMIN','LOGIN',NULL,1,'Người dùng đăng nhập thành công','2026-04-15 11:05:04'),(10,'USR_ADMIN','LOGIN',NULL,1,'Người dùng đăng nhập thành công','2026-04-15 11:18:41'),(11,'USR_ADMIN','LOGIN',NULL,1,'Người dùng đăng nhập thành công','2026-04-15 11:19:42'),(12,'USR_ADMIN','LOGIN',NULL,1,'Người dùng đăng nhập thành công','2026-04-15 11:32:08'),(13,'USR_ADMIN','LOGIN',NULL,1,'Người dùng đăng nhập thành công','2026-04-15 11:36:30'),(14,'USR_ADMIN','LOGIN',NULL,1,'Người dùng đăng nhập thành công','2026-04-15 15:07:53'),(15,'USR_ADMIN','LOGIN',NULL,1,'Người dùng đăng nhập thành công','2026-04-16 09:01:55'),(16,'USR_ADMIN','LOGIN',NULL,1,'Người dùng đăng nhập thành công','2026-04-17 14:02:13'),(17,'USR_ADMIN','LOGIN',NULL,1,'Người dùng đăng nhập thành công','2026-04-20 08:44:44'),(18,'USR_WORKER_01','LOGIN',NULL,1,'Người dùng đăng nhập thành công','2026-04-20 10:35:44'),(19,'USR_MANAGER_01','LOGIN',NULL,1,'Người dùng đăng nhập thành công','2026-04-20 10:36:20'),(20,'USR_ADMIN','LOGIN',NULL,1,'Người dùng đăng nhập thành công','2026-04-20 10:36:55');
 /*!40000 ALTER TABLE `log_he_thong` ENABLE KEYS */;
 UNLOCK TABLES;
+
+--
+-- Table structure for table `alert_trang_thai`
+--
+
+DROP TABLE IF EXISTS `alert_trang_thai`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `alert_trang_thai` (
+  `ma_thiet_bi` varchar(50) NOT NULL,
+  `alert_kind` varchar(30) NOT NULL,
+  `is_active` tinyint(1) NOT NULL DEFAULT '0',
+  `previous_value` float DEFAULT NULL,
+  `last_sensor_value` float DEFAULT NULL,
+  `last_seen_at` datetime DEFAULT NULL,
+  `last_alert_id` bigint DEFAULT NULL,
+  `resolved_at` datetime DEFAULT NULL,
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`ma_thiet_bi`,`alert_kind`),
+  KEY `idx_alert_kind` (`alert_kind`),
+  CONSTRAINT `alert_trang_thai_ibfk_1` FOREIGN KEY (`ma_thiet_bi`) REFERENCES `cam_bien` (`ma_thiet_bi`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 
 --
 -- Table structure for table `nguoi_dung`

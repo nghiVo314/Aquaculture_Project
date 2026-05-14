@@ -17,8 +17,10 @@ router.get('/', requireAuth, async (req, res) => {
 
         // 3. Khởi tạo câu truy vấn cơ bản
         let query = `
-            SELECT ma_khu_vuc as ID, loai_thuy_san as LoaiHaiSan, ma_nguoi_dung_quan_ly 
-            FROM khu_vuc
+            SELECT kv.ma_khu_vuc as ID, kv.loai_thuy_san as LoaiHaiSan, kv.ma_nguoi_dung_quan_ly,
+                   nd.ten_dang_nhap as manager
+            FROM khu_vuc kv
+            LEFT JOIN nguoi_dung nd ON nd.ma_nguoi_dung = kv.ma_nguoi_dung_quan_ly
         `;
         let queryParams = [];
 
@@ -42,14 +44,29 @@ router.post('/', requireAuth, requirePermission('zone:create'), async (req, res)
     const { ma_khu_vuc, loai_thuy_san, ma_nguoi_dung_quan_ly } = req.body; 
     
     try {
+        const safeFishType = String(loai_thuy_san || '').trim();
+        const safeManagerId = ma_nguoi_dung_quan_ly ? String(ma_nguoi_dung_quan_ly).trim() : null;
+
+        if (!safeFishType) {
+            return res.status(400).json({ status: 'error', message: 'Thiếu loại thủy sản' });
+        }
+
         const [result] = await db.execute('SELECT COUNT(*) as total FROM khu_vuc');
         if (result[0].total >= 5) {
             return res.status(400).json({ status: 'error', message: 'Đã đạt giới hạn tối đa 5 vùng nuôi!' });
         }
 
+        // Luôn tạo mã khu vực an toàn nếu không có hoặc người dùng nhập rỗng
+        let finalMaKhuVuc = String(ma_khu_vuc || '').trim();
+        if (!finalMaKhuVuc) {
+            const [[row]] = await db.execute(`SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(ma_khu_vuc, '_', -1) AS UNSIGNED)), 0) as maxid FROM khu_vuc`);
+            const nextId = (row.maxid || 0) + 1;
+            finalMaKhuVuc = `KV_${String(nextId).padStart(2,'0')}`;
+        }
+
         await db.execute(
             'INSERT INTO khu_vuc (ma_khu_vuc, loai_thuy_san, ma_nguoi_dung_quan_ly) VALUES (?, ?, ?)', 
-            [ma_khu_vuc, loai_thuy_san, ma_nguoi_dung_quan_ly || null]
+            [finalMaKhuVuc, safeFishType, safeManagerId]
         );
         res.json({ status: 'added' });
     } catch (error) {
@@ -71,9 +88,16 @@ router.delete('/:id', requireAuth, requirePermission('zone:delete'), async (req,
 router.put('/:id', requireAuth, requirePermission('zone:update'), async (req, res) => {
     const { loai_thuy_san, ma_nguoi_dung_quan_ly } = req.body;
     try {
+        const safeFishType = String(loai_thuy_san || '').trim();
+        const safeManagerId = ma_nguoi_dung_quan_ly ? String(ma_nguoi_dung_quan_ly).trim() : null;
+
+        if (!safeFishType) {
+            return res.status(400).json({ status: 'error', message: 'Thiếu loại thủy sản' });
+        }
+
         await db.execute(
             'UPDATE khu_vuc SET loai_thuy_san = ?, ma_nguoi_dung_quan_ly = ? WHERE ma_khu_vuc = ?',
-            [loai_thuy_san, ma_nguoi_dung_quan_ly || null, req.params.id]
+            [safeFishType, safeManagerId, req.params.id]
         );
         res.json({ status: 'updated' });
     } catch (error) {

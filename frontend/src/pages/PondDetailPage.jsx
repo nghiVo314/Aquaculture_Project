@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import SensorChart from '../components/SensorChart';
@@ -18,8 +18,146 @@ import {
   deleteFeedingFormula,
   getPondAlerts,
   acknowledgeAlert,
-  suggestSchedules
+  suggestSchedules,
+  getThresholdHistory,
+  getWorkers,
+  getPondWorkers,
+  addPondWorker,
+  removePondWorker,
+  updatePondWorkerRole
 } from '../services/api';
+import { dedupeWarnings, getWarningSeverityLabel, parseWarningMeta, toWorkerName } from '../utils/warning';
+
+const SENSOR_SEVERITY_ORDER = {
+  critical: 3,
+  warning: 2,
+  caution: 1,
+  normal: 0,
+  unknown: -1
+};
+
+const SENSOR_INSIGHTS = {
+  TEMP: {
+    high: { device: 'FAN', action: 'Bật quạt để hạ nhiệt', note: 'Nhiệt độ đang cao hơn ngưỡng an toàn.' },
+    low: { device: 'FAN', action: 'Bật quạt theo chu kỳ / kiểm tra nước vào', note: 'Nhiệt độ đang thấp hơn ngưỡng.' }
+  },
+  DO: {
+    high: { device: 'PUMP', action: 'Đã ổn định', note: 'Oxy hòa tan đang tốt.' },
+    low: { device: 'PUMP', action: 'Bật sục khí / tăng oxy', note: 'Oxy hòa tan đang thấp.' }
+  },
+  LIGHT: {
+    high: { device: 'FAN', action: 'Giảm chiếu sáng / che bớt nắng', note: 'Ánh sáng đang quá cao.' },
+    low: { device: 'FAN', action: 'Kiểm tra nguồn sáng', note: 'Ánh sáng đang thấp.' }
+  },
+  PH: {
+    high: { device: 'PUMP', action: 'Thay nước / điều chỉnh pH', note: 'pH đang cao hơn ngưỡng.' },
+    low: { device: 'PUMP', action: 'Bổ sung nước / điều chỉnh pH', note: 'pH đang thấp hơn ngưỡng.' }
+  },
+  SALINITY: {
+    high: { device: 'PUMP', action: 'Thay nước / giảm độ mặn', note: 'Độ mặn đang cao.' },
+    low: { device: 'PUMP', action: 'Bổ sung muối / kiểm tra nguồn nước', note: 'Độ mặn đang thấp.' }
+  }
+};
+
+const formatNumber = (value) => {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric.toFixed(1) : '--';
+};
+
+const getSensorMeta = (sensor) => {
+  const value = Number(sensor.latest_value);
+  const min = Number(sensor.min_value);
+  const max = Number(sensor.max_value);
+  const typeKey = String(sensor.LoaiCamBien || '').toUpperCase();
+  const insight = SENSOR_INSIGHTS[typeKey] || {};
+
+  if (!Number.isFinite(value) || !Number.isFinite(min) || !Number.isFinite(max)) {
+    return {
+      statusKey: 'unknown',
+      label: 'Chưa có dữ liệu',
+      badgeClass: 'bg-slate-500',
+      cardClass: 'border-slate-200 bg-slate-50',
+      valueClass: 'text-slate-700 bg-slate-100',
+      note: 'Đang chờ dữ liệu cảm biến.',
+      actionText: 'Chưa thể đề xuất hành động',
+      deviceText: 'Chưa xác định',
+      displayValue: '--',
+      detailText: `Ngưỡng an toàn: ${sensor.min_value} - ${sensor.max_value}`
+    };
+  }
+
+  const range = Math.max(Math.abs(max - min), 0.1);
+  const lowerGap = value < min ? (min - value) / range : 0;
+  const upperGap = value > max ? (value - max) / range : 0;
+  const edgeGap = value >= min && value <= max ? Math.min(value - min, max - value) / range : 0;
+  const outOfRange = value < min || value > max;
+
+  let statusKey = 'normal';
+  if (outOfRange && Math.max(lowerGap, upperGap) >= 0.35) statusKey = 'critical';
+  else if (outOfRange && Math.max(lowerGap, upperGap) >= 0.15) statusKey = 'warning';
+  else if (outOfRange) statusKey = 'caution';
+  else if (edgeGap <= 0.1) statusKey = 'caution';
+
+  const statusMap = {
+    critical: {
+      label: 'Nguy hiểm',
+      badgeClass: 'bg-red-600',
+      badgeColor: '#dc2626',
+      cardClass: 'border-red-200 bg-red-50',
+      valueClass: 'text-red-700 bg-red-100'
+    },
+    warning: {
+      label: 'Cảnh báo',
+      badgeClass: 'bg-orange-500',
+      badgeColor: '#f97316',
+      cardClass: 'border-orange-200 bg-orange-50',
+      valueClass: 'text-orange-700 bg-orange-100'
+    },
+    caution: {
+      label: 'Cần chú ý',
+      badgeClass: 'bg-amber-400',
+      badgeColor: '#eab308',
+      cardClass: 'border-amber-200 bg-amber-50',
+      valueClass: 'text-amber-700 bg-amber-100'
+    },
+    normal: {
+      label: 'Ổn định',
+      badgeClass: 'bg-emerald-500',
+      badgeColor: '#16a34a',
+      cardClass: 'border-emerald-200 bg-emerald-50',
+      valueClass: 'text-emerald-700 bg-emerald-100'
+    },
+    unknown: {
+      label: 'Chưa rõ',
+      badgeClass: 'bg-slate-400',
+      badgeColor: '#94a3b8',
+      cardClass: 'border-slate-200 bg-slate-50',
+      valueClass: 'text-slate-700 bg-slate-100'
+    }
+  };
+
+  const direction = value > max ? 'high' : 'low';
+  const recommendation = insight[direction] || { device: 'N/A', action: 'Theo dõi thêm', note: 'Chưa có khuyến nghị cụ thể.' };
+
+  return {
+    statusKey,
+    label: statusMap[statusKey].label,
+    badgeClass: statusMap[statusKey].badgeClass,
+    badgeColor: statusMap[statusKey].badgeColor,
+    cardClass: statusMap[statusKey].cardClass,
+    valueClass: statusMap[statusKey].valueClass,
+    note: recommendation.note,
+    actionText: recommendation.action,
+    deviceText: recommendation.device,
+    displayValue: formatNumber(value),
+    detailText: `Ngưỡng an toàn: ${sensor.min_value} - ${sensor.max_value}`,
+    deviation: outOfRange
+      ? `Chênh ${Math.abs(value < min ? min - value : value - max).toFixed(1)}`
+      : `Còn cách biên ${Math.min(value - min, max - value).toFixed(1)}`
+  };
+};
+
+const getHistoryStatusLabel = (row) => (Number(row.da_sua) === 1 ? 'Đã sửa' : 'Chưa sửa');
 
 const PondDetailPage = () => {
   const { id } = useParams(); // id chính là ma_ao_nuoi
@@ -35,8 +173,21 @@ const PondDetailPage = () => {
   const [feedingHistory, setFeedingHistory] = useState([]);
   const [formulas, setFormulas] = useState([]);
   const [alerts, setAlerts] = useState([]);
+  const [alertsSort, setAlertsSort] = useState('urgent');
   const [suggestedSchedules, setSuggestedSchedules] = useState([]);
   const [suggestLoading, setSuggestLoading] = useState(false);
+  const [thresholdHistory, setThresholdHistory] = useState([]);
+  const [pondWorkers, setPondWorkers] = useState([]);
+  const [workerOptions, setWorkerOptions] = useState([]);
+  const [workerForm, setWorkerForm] = useState({ ma_nguoi_dung: '', vai_tro: 'PRIMARY' });
+  const [workerBusy, setWorkerBusy] = useState(false);
+
+  const visibleAlerts = useMemo(() => dedupeWarnings(alerts), [alerts]);
+  const [sensorFilter, setSensorFilter] = useState('all');
+  const [sensorSort, setSensorSort] = useState('severity');
+  const [historyFilter, setHistoryFilter] = useState('all');
+  const [historySort, setHistorySort] = useState('newest');
+  const canManageWorkers = hasPermission('pond:manage:workers');
 
   // States Form
   const [scheduleForm, setScheduleForm] = useState({ ma_tb_dieu_khien: '', start_time: '', end_time: '', ma_cong_thuc: '' });
@@ -76,15 +227,25 @@ const PondDetailPage = () => {
         // Set danh sách công thức
         setFormulas(Array.isArray(allFormulas) ? allFormulas : (allFormulas?.data || []));
 
+        const [allWorkers, currentWorkers] = await Promise.all([
+          getWorkers().catch(() => []),
+          getPondWorkers(id).catch(() => [])
+        ]);
+        setWorkerOptions(Array.isArray(allWorkers) ? allWorkers : (allWorkers?.data || []));
+        setPondWorkers(Array.isArray(currentWorkers) ? currentWorkers : (currentWorkers?.data || []));
+
         // Tải lịch trình & lịch sử cho các thiết bị của ao này
         await refreshDynamicData(currentPondDevices);
         await loadPondAlerts();
+        await loadThresholdHistory();
 
         // Đặt interval cập nhật dữ liệu động (Cảm biến & Lịch sử) mỗi 5s
         intervalId = setInterval(() => {
           getPondConfig(id).then(setPondConfig).catch(console.error);
           refreshDynamicData(currentPondDevices);
           loadPondAlerts();
+          loadThresholdHistory();
+          getPondWorkers(id).then((rows) => setPondWorkers(Array.isArray(rows) ? rows : (rows?.data || []))).catch(() => {});
         }, 5000);
 
       } catch (err) {
@@ -98,7 +259,7 @@ const PondDetailPage = () => {
     return () => {
       if (intervalId) clearInterval(intervalId);
     };
-  }, [id]);
+  }, [id, alertsSort]);
 
   // Hàm tải lại Lịch trình & Lịch sử cho ăn (được lọc theo thiết bị của ao)
   const refreshDynamicData = async (pondDevices) => {
@@ -121,10 +282,20 @@ const PondDetailPage = () => {
 
   const loadPondAlerts = async () => {
     try {
-      const rows = await getPondAlerts(id, 'unacknowledged');
+      const rows = await getPondAlerts(id, 'unacknowledged', { sort: alertsSort });
       setAlerts(Array.isArray(rows) ? rows : []);
     } catch (err) {
       console.error('Lỗi tải cảnh báo ao:', err);
+    }
+  };
+
+  const loadThresholdHistory = async () => {
+    try {
+      const rows = await getThresholdHistory(id);
+      setThresholdHistory(Array.isArray(rows) ? rows : []);
+    } catch (err) {
+      console.error('Lỗi tải lịch sử chỉnh ngưỡng:', err);
+      setThresholdHistory([]);
     }
   };
 
@@ -227,6 +398,51 @@ const PondDetailPage = () => {
     }
   };
 
+  const refreshPondWorkers = async () => {
+    const rows = await getPondWorkers(id);
+    setPondWorkers(Array.isArray(rows) ? rows : (rows?.data || []));
+  };
+
+  const handleAddPondWorker = async (event) => {
+    event.preventDefault();
+    if (!workerForm.ma_nguoi_dung) return;
+    setWorkerBusy(true);
+    try {
+      await addPondWorker(id, workerForm);
+      await refreshPondWorkers();
+      setWorkerForm({ ma_nguoi_dung: '', vai_tro: 'PRIMARY' });
+    } catch (err) {
+      alert('Không thể gán worker: ' + err.message);
+    } finally {
+      setWorkerBusy(false);
+    }
+  };
+
+  const handleRemovePondWorker = async (workerId) => {
+    if (!window.confirm('Xóa worker khỏi ao này?')) return;
+    setWorkerBusy(true);
+    try {
+      await removePondWorker(id, workerId);
+      await refreshPondWorkers();
+    } catch (err) {
+      alert('Không thể xóa worker: ' + err.message);
+    } finally {
+      setWorkerBusy(false);
+    }
+  };
+
+  const handleChangeWorkerRole = async (workerId, vai_tro) => {
+    setWorkerBusy(true);
+    try {
+      await updatePondWorkerRole(id, workerId, { vai_tro });
+      await refreshPondWorkers();
+    } catch (err) {
+      alert('Không thể cập nhật vai trò worker: ' + err.message);
+    } finally {
+      setWorkerBusy(false);
+    }
+  };
+
   const handleAddFormula = async (e) => {
     e.preventDefault();
     try {
@@ -254,6 +470,47 @@ const handleDeleteFormula = async (formulaId) => {
   }
 };
 
+  const sensorRows = useMemo(() => {
+    const rows = (pondConfig?.configs || []).map((sensor) => ({
+      ...sensor,
+      ...getSensorMeta(sensor)
+    }));
+
+    const filtered = rows.filter((sensor) => sensorFilter === 'all' || sensor.statusKey === sensorFilter);
+
+    return filtered.sort((a, b) => {
+      if (sensorSort === 'value') {
+        return Number(b.latest_value || 0) - Number(a.latest_value || 0);
+      }
+
+      if (sensorSort === 'name') {
+        return String(a.LoaiCamBien || '').localeCompare(String(b.LoaiCamBien || ''), 'vi');
+      }
+
+      return SENSOR_SEVERITY_ORDER[b.statusKey] - SENSOR_SEVERITY_ORDER[a.statusKey];
+    });
+  }, [pondConfig, sensorFilter, sensorSort]);
+
+  const visibleThresholdHistory = useMemo(() => {
+    let rows = Array.isArray(thresholdHistory) ? [...thresholdHistory] : [];
+
+    if (historyFilter === 'done') {
+      rows = rows.filter((row) => Number(row.da_sua) === 1);
+    }
+
+    if (historyFilter === 'pending') {
+      rows = rows.filter((row) => Number(row.da_sua) !== 1);
+    }
+
+    rows.sort((a, b) => {
+      const timeA = new Date(a.thoi_gian || 0).getTime();
+      const timeB = new Date(b.thoi_gian || 0).getTime();
+      return historySort === 'oldest' ? timeA - timeB : timeB - timeA;
+    });
+
+    return rows;
+  }, [thresholdHistory, historyFilter, historySort]);
+
   if (!pondConfig) return <div>Đang tải dữ liệu ao...</div>;
 
   const controlDevices = devices.filter(d => d.loai_thiet_bi !== null);
@@ -263,43 +520,190 @@ const handleDeleteFormula = async (formulaId) => {
     <div className="panel">
       <div style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <button onClick={() => navigate(-1)} style={{ padding: '8px 16px', cursor: 'pointer' }}>← Quay lại</button>
-        <h2 style={{ margin: 0 }}>Quản lý Ao: {id} {pondData ? `(Trạm ${pondData.ma_tram})` : ''}</h2>
+        <div style={{ textAlign: 'right' }}>
+          <h2 style={{ margin: 0 }}>Quản lý Ao: {id} {pondData ? `(Trạm ${pondData.ma_tram})` : ''}</h2>
+          <div style={{ fontSize: '0.9em', color: '#6b7280', marginTop: '4px' }}>
+            Worker phụ trách: {pondData?.nguoi_phu_trach || 'Chưa gán'}
+          </div>
+        </div>
+      </div>
+
+      <div className="card" style={{ padding: '20px', border: '1px solid #dbeafe', borderRadius: '8px', marginBottom: '20px', background: '#f8fbff' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
+          <h3 style={{ margin: 0 }}>Phân công Worker cho Ao</h3>
+          <span style={{ color: '#6b7280', fontSize: '0.9em' }}>Hỗ trợ nhiều worker trên cùng ao</span>
+        </div>
+
+        {canManageWorkers ? (
+          <form onSubmit={handleAddPondWorker} style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+            <select
+              value={workerForm.ma_nguoi_dung}
+              onChange={(e) => setWorkerForm({ ...workerForm, ma_nguoi_dung: e.target.value })}
+              style={{ padding: '8px 10px', minWidth: 260 }}
+            >
+              <option value="">-- Chọn worker --</option>
+              {workerOptions.map((worker) => {
+                const workerId = worker.ma_nguoi_dung || worker.ID;
+                const workerName = worker.ten_dang_nhap || worker.TenDangNhap || worker.username;
+                return <option key={workerId} value={workerId}>{workerName}</option>;
+              })}
+            </select>
+            <select
+              value={workerForm.vai_tro}
+              onChange={(e) => setWorkerForm({ ...workerForm, vai_tro: e.target.value })}
+              style={{ padding: '8px 10px' }}
+            >
+              <option value="PRIMARY">PRIMARY</option>
+              <option value="MAINTENANCE">MAINTENANCE</option>
+              <option value="ASSISTANT">ASSISTANT</option>
+            </select>
+            <button type="submit" disabled={workerBusy || !workerForm.ma_nguoi_dung} style={{ padding: '8px 14px', cursor: 'pointer' }}>
+              {workerBusy ? 'Đang xử lý...' : 'Gán worker'}
+            </button>
+          </form>
+        ) : (
+          <div style={{ marginBottom: 12, color: '#6b7280' }}>Bạn chỉ xem được danh sách worker của ao này.</div>
+        )}
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+          {pondWorkers.length === 0 ? (
+            <div style={{ color: '#6b7280' }}>Chưa có worker nào được gán.</div>
+          ) : pondWorkers.map((worker) => (
+            <div key={`${worker.ma_nguoi_dung}-${worker.vai_tro}`} style={{ border: '1px solid #dbeafe', borderRadius: 8, padding: 12, background: '#fff' }}>
+              <div style={{ fontWeight: 700 }}>{worker.ten_dang_nhap}</div>
+              <div style={{ fontSize: '0.85em', color: '#6b7280', marginTop: 4 }}>Vai trò: {worker.vai_tro}</div>
+              {canManageWorkers && (
+                <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+                  <select
+                    value={worker.vai_tro}
+                    onChange={(e) => handleChangeWorkerRole(worker.ma_nguoi_dung, e.target.value)}
+                    disabled={workerBusy}
+                    style={{ padding: '6px 8px' }}
+                  >
+                    <option value="PRIMARY">PRIMARY</option>
+                    <option value="MAINTENANCE">MAINTENANCE</option>
+                    <option value="ASSISTANT">ASSISTANT</option>
+                  </select>
+                  <button type="button" onClick={() => handleRemovePondWorker(worker.ma_nguoi_dung)} disabled={workerBusy} style={{ padding: '6px 10px', color: '#fff', background: '#dc2626', border: 'none', borderRadius: 6 }}>
+                    Xóa
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
       </div>
 
       {error && <div style={{ color: 'red', marginBottom: '15px' }}>{error}</div>}
 
       {/* --- PHẦN 1: GIÁM SÁT CẢM BIẾN --- */}
-      <div className="grid-three" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px', marginBottom: '30px' }}>
-        {pondConfig.configs.map(sensor => (
-          <div key={sensor.ma_cam_bien} className="sensor-container" style={{ border: '1px solid #eee', padding: '15px', borderRadius: '10px', background: '#fff' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-              <strong style={{ fontSize: '1.1em' }}>{sensor.LoaiCamBien}</strong>
-              <span
-                style={{
-                  fontSize: '0.85em',
-                  padding: '4px 8px',
-                  borderRadius: '999px',
-                  color: '#fff',
-                  background: Number(sensor.latest_value) > Number(sensor.max_value) || Number(sensor.latest_value) < Number(sensor.min_value) ? '#d4380d' : '#2f9e44'
-                }}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap', marginBottom: '14px' }}>
+        <h3 style={{ margin: 0 }}>Giám sát cảm biến</h3>
+        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+          <select value={sensorFilter} onChange={(e) => setSensorFilter(e.target.value)} style={{ padding: '8px 10px' }}>
+            <option value="all">Tất cả trạng thái</option>
+            <option value="critical">Nguy hiểm</option>
+            <option value="warning">Cảnh báo</option>
+            <option value="caution">Cần chú ý</option>
+            <option value="normal">Ổn định</option>
+          </select>
+          <select value={sensorSort} onChange={(e) => setSensorSort(e.target.value)} style={{ padding: '8px 10px' }}>
+            <option value="severity">Sắp xếp theo mức độ</option>
+            <option value="value">Sắp xếp theo giá trị</option>
+            <option value="name">Sắp xếp theo tên</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="grid-three" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px', marginBottom: '30px' }}>
+        {sensorRows.length > 0 ? sensorRows.map(sensor => (
+          <div key={sensor.ma_cam_bien} className="sensor-container" style={{ border: `1px solid ${sensor.statusKey === 'critical' ? '#fca5a5' : sensor.statusKey === 'warning' ? '#fdba74' : sensor.statusKey === 'caution' ? '#fcd34d' : '#bbf7d0'}`, padding: '16px', borderRadius: '14px', background: '#fff', boxShadow: '0 8px 20px rgba(0,0,0,0.04)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', marginBottom: '12px' }}>
+              <div>
+                <strong style={{ fontSize: '1.05em' }}>{sensor.LoaiCamBien}</strong>
+                <div style={{ fontSize: '0.82em', color: '#6b7280', marginTop: '4px' }}>Thiết bị: {sensor.ma_cam_bien}</div>
+              </div>
+              <span style={{ fontSize: '0.8em', padding: '6px 10px', borderRadius: '999px', color: '#fff', background: sensor.badgeColor }}
               >
-                {Number(sensor.latest_value) > Number(sensor.max_value) || Number(sensor.latest_value) < Number(sensor.min_value) ? 'Vượt ngưỡng' : 'Ổn định'}
+                {sensor.label}
               </span>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-              <span style={{ fontSize: '1.5em', fontWeight: 'bold', color: '#1890ff', padding: '4px 10px', background: '#e6f7ff', borderRadius: '5px' }}>
-                {sensor.latest_value ? sensor.latest_value.toFixed(1) : '--'} 
+            <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '14px', alignItems: 'center', marginBottom: '10px' }}>
+              <span style={{ fontSize: '1.5em', fontWeight: 'bold', color: '#0f7ba8', padding: '6px 12px', background: '#e6f7ff', borderRadius: '10px' }}>
+                {sensor.displayValue}
               </span>
-              <span style={{ color: '#666', fontSize: '0.9em' }}>
-                Min {sensor.min_value} - Max {sensor.max_value}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <div style={{ color: '#374151', fontSize: '0.92em' }}>{sensor.detailText}</div>
+                <div style={{ color: '#6b7280', fontSize: '0.85em' }}>{sensor.note}</div>
+                <div style={{ color: '#0f5132', fontSize: '0.85em', fontWeight: 600 }}>Tự động kích hoạt: {sensor.deviceText} | {sensor.actionText}</div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', marginBottom: '10px', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '0.85em', color: '#666' }}>{sensor.deviation}</span>
+              <span style={{ fontSize: '0.8em', color: '#fff', padding: '4px 10px', borderRadius: '999px', background: sensor.badgeColor }}>
+                {sensor.label}
               </span>
             </div>
             <SensorChart deviceId={sensor.ma_cam_bien} label={sensor.LoaiCamBien} />
-            <div style={{ fontSize: '0.8em', color: '#888', marginTop: '5px' }}>
-              Ngưỡng an toàn: {sensor.min_value} - {sensor.max_value}
-            </div>
           </div>
-        ))}
+        )) : (
+          <div style={{ color: '#6b7280' }}>Chưa có cảm biến nào.</div>
+        )}
+      </div>
+
+      <div className="card" style={{ padding: '20px', border: '1px solid #ccc', borderRadius: '8px', marginBottom: '20px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap', marginBottom: '12px' }}>
+          <h3 style={{ margin: 0 }}>Lịch sử chỉnh ngưỡng</h3>
+          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+            <select value={historyFilter} onChange={(e) => setHistoryFilter(e.target.value)} style={{ padding: '8px 10px' }}>
+              <option value="all">Tất cả</option>
+              <option value="done">Đã sửa</option>
+              <option value="pending">Chưa sửa</option>
+            </select>
+            <select value={historySort} onChange={(e) => setHistorySort(e.target.value)} style={{ padding: '8px 10px' }}>
+              <option value="newest">Mới nhất</option>
+              <option value="oldest">Cũ nhất</option>
+            </select>
+          </div>
+        </div>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '900px' }}>
+            <thead>
+              <tr style={{ background: '#f8fafc', textAlign: 'left' }}>
+                <th style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>Thời gian</th>
+                <th style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>Loại</th>
+                <th style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>Thiết bị</th>
+                <th style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>Vị trí thiết bị</th>
+                <th style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>Mô tả</th>
+                <th style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>Người sửa</th>
+                <th style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>Trạng thái</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleThresholdHistory.length === 0 ? (
+                <tr>
+                  <td colSpan="7" style={{ padding: '18px', textAlign: 'center', color: '#6b7280' }}>Chưa có lịch sử chỉnh ngưỡng.</td>
+                </tr>
+              ) : (
+                visibleThresholdHistory.map((row) => (
+                  <tr key={row.id}>
+                    <td style={{ padding: '10px', borderBottom: '1px solid #f1f5f9' }}>{new Date(row.thoi_gian).toLocaleString('vi-VN')}</td>
+                    <td style={{ padding: '10px', borderBottom: '1px solid #f1f5f9' }}>{row.loai_cam_bien}</td>
+                    <td style={{ padding: '10px', borderBottom: '1px solid #f1f5f9' }}>{row.ma_tb_dieu_khien}</td>
+                    <td style={{ padding: '10px', borderBottom: '1px solid #f1f5f9' }}>{row.vi_tri_thiet_bi}</td>
+                    <td style={{ padding: '10px', borderBottom: '1px solid #f1f5f9', maxWidth: '320px' }}>{row.mo_ta}</td>
+                    <td style={{ padding: '10px', borderBottom: '1px solid #f1f5f9' }}>{row.nguoi_sua}</td>
+                    <td style={{ padding: '10px', borderBottom: '1px solid #f1f5f9' }}>
+                      <span style={{ display: 'inline-block', padding: '4px 10px', borderRadius: '999px', background: Number(row.da_sua) === 1 ? '#dcfce7' : '#fee2e2', color: Number(row.da_sua) === 1 ? '#166534' : '#991b1b', fontSize: '0.8em', fontWeight: 700 }}>
+                        {getHistoryStatusLabel(row)}
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <hr style={{ margin: '30px 0', borderColor: '#eee' }} />
@@ -375,25 +779,64 @@ const handleDeleteFormula = async (formulaId) => {
       {/* --- PHẦN 3: LỊCH TRÌNH VÀ CÔNG THỨC CHO ĂN --- */}
       <h3>Cài đặt Lịch trình & Công thức</h3>
       <div className="card" style={{ padding: '20px', border: '1px solid #ccc', borderRadius: '8px', marginBottom: '20px' }}>
-        <h4>Cảnh báo chưa xử lý ({alerts.length})</h4>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <h4 style={{ margin: 0 }}>Cảnh báo nổi bật ({visibleAlerts.length})</h4>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <select value={alertsSort} onChange={(e) => setAlertsSort(e.target.value)} style={{ padding: '8px 10px' }}>
+              <option value="urgent">Cần xử lý gấp</option>
+              <option value="newest">Mới nhất</option>
+            </select>
+            <button type="button" onClick={() => navigate('/alerts')} style={{ background: '#f97316', color: '#fff' }}>
+              Xem toàn bộ
+            </button>
+          </div>
+        </div>
         {alerts.length === 0 ? (
-          <div style={{ color: '#777' }}>Không có cảnh báo chưa xử lý cho ao này.</div>
+          <div style={{ color: '#777', marginTop: 12 }}>Không có cảnh báo cho ao này.</div>
         ) : (
-          <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-            {alerts.map((item) => (
-              <li key={item.ma_log} style={{ padding: '10px 0', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
-                <div>
-                  <div style={{ fontWeight: 600 }}>{item.mo_ta}</div>
-                  <div style={{ fontSize: '0.85em', color: '#777' }}>{new Date(item.thoi_gian_khoi_tao).toLocaleString('vi-VN')}</div>
-                </div>
-                {hasPermission('alerts:ack') && (
-                  <button onClick={() => handleAckAlert(item.ma_log)} style={{ border: 'none', background: '#1677ff', color: '#fff', borderRadius: '6px', padding: '8px 10px', cursor: 'pointer' }}>
-                    Đánh dấu đã xử lý
-                  </button>
-                )}
-              </li>
-            ))}
-          </ul>
+          <div style={{ maxHeight: 340, overflow: 'auto', marginTop: 12, border: '1px solid #e5e7eb', borderRadius: 8 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 900 }}>
+              <thead>
+                <tr style={{ background: '#f8fafc', textAlign: 'left' }}>
+                  <th style={{ padding: '8px', borderBottom: '1px solid #ddd' }}>STT</th>
+                  <th style={{ padding: '8px', borderBottom: '1px solid #ddd' }}>Thiết bị</th>
+                  <th style={{ padding: '8px', borderBottom: '1px solid #ddd' }}>Vị trí</th>
+                  <th style={{ padding: '8px', borderBottom: '1px solid #ddd' }}>Mô tả</th>
+                  <th style={{ padding: '8px', borderBottom: '1px solid #ddd' }}>Người xử lý</th>
+                  <th style={{ padding: '8px', borderBottom: '1px solid #ddd' }}>Tình trạng</th>
+                  <th style={{ padding: '8px', borderBottom: '1px solid #ddd' }}>Mức độ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleAlerts.map((item, index) => {
+                  const meta = parseWarningMeta(item);
+                  const severityLabel = getWarningSeverityLabel(meta.severity);
+                  return (
+                    <tr key={item.ma_log}>
+                      <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{index + 1}</td>
+                      <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{meta.device || meta.sensorId || '-'}</td>
+                      <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{meta.areaText || '-'}</td>
+                      <td style={{ padding: '8px', borderBottom: '1px solid #eee', maxWidth: 360 }}>{meta.description || item.mo_ta}</td>
+                      <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{toWorkerName(item)}</td>
+                      <td style={{ padding: '8px', borderBottom: '1px solid #eee', display: 'flex', gap: 8, alignItems: 'center' }}>
+                        <span>{item.acknowledged ? 'Đã xử lý' : 'Chưa xử lý'}</span>
+                        {!item.acknowledged && hasPermission('alerts:ack') && (
+                          <button onClick={() => handleAckAlert(item.ma_log)} style={{ border: 'none', background: '#1677ff', color: '#fff', borderRadius: '6px', padding: '8px 10px', cursor: 'pointer' }}>
+                            Đánh dấu đã xử lý
+                          </button>
+                        )}
+                      </td>
+                      <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>
+                        <span style={{ padding: '4px 10px', borderRadius: 999, color: '#fff', background: severityLabel.color }}>
+                          {severityLabel.label}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
       <div className="grid-two" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '30px' }}>

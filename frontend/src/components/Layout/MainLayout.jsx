@@ -23,6 +23,7 @@ const MainLayout = () => {
     // { label: 'Điều khiển', path: '/control' },
     // { label: 'Lịch trình', path: '/schedules' },
     { label: 'Báo cáo', path: '/reports' },
+    { label: 'Cảnh báo', path: '/alerts' },
     { label: 'Nhật ký', path: '/logs' },
   ];
 

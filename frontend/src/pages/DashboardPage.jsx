@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
-  getDashboardSummary, addZone, updateZone, deleteZone 
+  getDashboardSummary, addZone, updateZone, deleteZone, getManagers, getAlerts, getWorkerWorkload
 } from '../services/api';
+import { dedupeWarnings, getWarningSeverityLabel, parseWarningMeta } from '../utils/warning';
 import { useAuth } from '../context/AuthContext';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as ChartTooltip, ResponsiveContainer, Legend
@@ -31,28 +32,55 @@ const KpiCard = ({ title, value, icon: Icon, colorClass, bgColorClass, tooltip }
   </div>
 );
 
+const buildNextZoneId = (zones = []) => {
+  const maxNumber = zones.reduce((max, zone) => {
+    const match = String(zone.KhuVuc_ID || '').match(/(\d+)/);
+    if (!match) return max;
+    const value = Number(match[1]);
+    return Number.isFinite(value) && value > max ? value : max;
+  }, 0);
+
+  return `KV_${String(maxNumber + 1)}`;
+};
+
 // ==========================================
 // 2. COMPONENT: MODAL FORM (THÊM/SỬA)
 // ==========================================
-const ZoneModal = ({ isOpen, onClose, onSubmit, initialData, isLoading }) => {
-  const [formData, setFormData] = useState({ ma_khu_vuc: '', loai_thuy_san: '' });
+  const ZoneModal = ({ isOpen, onClose, onSubmit, initialData, isLoading, managers = [], suggestedZoneId = '' }) => {
+  const [formData, setFormData] = useState({ ma_khu_vuc: '', loai_thuy_san: '', ma_nguoi_dung_quan_ly: '' });
+  const [draggingManagerId, setDraggingManagerId] = useState('');
 
   useEffect(() => {
     if (initialData) {
       setFormData({ 
         ma_khu_vuc: initialData.KhuVuc_ID || '', 
-        loai_thuy_san: initialData.LoaiHaiSan || '' 
+        loai_thuy_san: initialData.LoaiHaiSan || '',
+        ma_nguoi_dung_quan_ly: initialData.ma_nguoi_dung_quan_ly || ''
       });
     } else {
-      setFormData({ ma_khu_vuc: '', loai_thuy_san: '' });
+      setFormData({ ma_khu_vuc: suggestedZoneId || '', loai_thuy_san: '', ma_nguoi_dung_quan_ly: '' });
     }
-  }, [initialData, isOpen]);
+    setDraggingManagerId('');
+  }, [initialData, isOpen, suggestedZoneId]);
 
   if (!isOpen) return null;
+
+  const selectedManager = managers.find((manager) => String(manager.ma_nguoi_dung || manager.ID || manager.id) === String(formData.ma_nguoi_dung_quan_ly));
 
   const handleSubmit = (e) => {
     e.preventDefault();
     onSubmit(formData);
+  };
+
+  const applyManager = (managerId) => {
+    setFormData((prev) => ({ ...prev, ma_nguoi_dung_quan_ly: managerId }));
+  };
+
+  const handleDrop = (event) => {
+    event.preventDefault();
+    const managerId = event.dataTransfer.getData('text/plain') || draggingManagerId;
+    if (managerId) applyManager(managerId);
+    setDraggingManagerId('');
   };
 
   return (
@@ -73,11 +101,15 @@ const ZoneModal = ({ isOpen, onClose, onSubmit, initialData, isLoading }) => {
               type="text" 
               required
               disabled={!!initialData} // Không cho sửa ID nếu đang Edit
+              readOnly={!initialData}
               placeholder="VD: KV_A"
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none disabled:bg-gray-100"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none disabled:bg-gray-100 bg-gray-50"
               value={formData.ma_khu_vuc}
               onChange={(e) => setFormData({...formData, ma_khu_vuc: e.target.value})}
             />
+            {!initialData && (
+              <p className="text-xs text-gray-500 mt-1">Mã khu vực sẽ tự sinh và không cần nhập tay.</p>
+            )}
           </div>
           <div className="mb-6">
             <label className="block text-sm font-medium text-gray-700 mb-1">Loại Thủy Sản *</label>
@@ -89,6 +121,62 @@ const ZoneModal = ({ isOpen, onClose, onSubmit, initialData, isLoading }) => {
               value={formData.loai_thuy_san}
               onChange={(e) => setFormData({...formData, loai_thuy_san: e.target.value})}
             />
+          </div>
+          <div className="mb-6">
+            <label className="block text-sm font-medium text-gray-700 mb-2">Người quản lý</label>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Danh sách quản lý</div>
+                <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
+                  {managers.length === 0 && (
+                    <div className="text-sm text-gray-500">Chưa có người quản lý.</div>
+                  )}
+                  {managers.map((manager) => {
+                    const managerId = String(manager.ma_nguoi_dung || manager.ID || manager.id);
+                    const managerName = manager.ten_dang_nhap || manager.TenDangNhap || manager.username || 'Không rõ';
+                    const isActive = String(formData.ma_nguoi_dung_quan_ly) === managerId;
+                    return (
+                      <div
+                        key={managerId}
+                        draggable
+                        onDragStart={(event) => {
+                          event.dataTransfer.setData('text/plain', managerId);
+                          setDraggingManagerId(managerId);
+                        }}
+                        onDragEnd={() => setDraggingManagerId('')}
+                        onClick={() => applyManager(managerId)}
+                        className={`rounded-lg border px-3 py-2 cursor-move transition-colors ${isActive ? 'border-blue-500 bg-blue-50' : 'border-gray-200 bg-white hover:border-blue-300 hover:bg-blue-50'}`}
+                      >
+                        <div className="font-medium text-gray-800">{managerName}</div>
+                        <div className="text-xs text-gray-500">Kéo vào ô bên phải hoặc bấm để chọn</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              <div
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={handleDrop}
+                className="rounded-lg border-2 border-dashed border-blue-300 bg-blue-50 p-3 min-h-40 flex flex-col justify-center"
+              >
+                <div className="text-xs font-semibold uppercase tracking-wide text-blue-600 mb-2">Ô gán quản lý</div>
+                {selectedManager ? (
+                  <div className="rounded-lg bg-white border border-blue-200 p-3 shadow-sm">
+                    <div className="font-semibold text-gray-800">{selectedManager.ten_dang_nhap || selectedManager.TenDangNhap || selectedManager.username}</div>
+                    <div className="text-xs text-gray-500 mt-1">Đã gán cho khu vực này</div>
+                    <button
+                      type="button"
+                      onClick={() => applyManager('')}
+                      className="mt-3 text-xs text-red-600 hover:text-red-700"
+                    >
+                      Bỏ chọn
+                    </button>
+                  </div>
+                ) : (
+                  <div className="text-sm text-blue-700">Kéo một người quản lý vào đây.</div>
+                )}
+              </div>
+            </div>
           </div>
           <div className="flex justify-end space-x-3">
             <button 
@@ -130,13 +218,21 @@ const DashboardPage = () => {
   
   // State quản lý Modal & Action
   const [modalConfig, setModalConfig] = useState({ isOpen: false, mode: 'add', data: null });
+  const [managers, setManagers] = useState([]);
   const [actionLoading, setActionLoading] = useState(false);
   const [toastMessage, setToastMessage] = useState({ text: '', type: '' });
+  const [topAlerts, setTopAlerts] = useState([]);
+  const [alertSort, setAlertSort] = useState('urgent');
+  const [alertDays, setAlertDays] = useState('all');
+  const [workerWorkload, setWorkerWorkload] = useState([]);
+  const suggestedZoneId = useMemo(() => buildNextZoneId(data.zones || []), [data.zones]);
 
   // Permissions
   const canCreateZone = user?.permissions?.includes('zone:create');
   const canUpdateZone = user?.permissions?.includes('zone:update');
   const canDeleteZone = user?.permissions?.includes('zone:delete');
+
+  const visibleTopAlerts = useMemo(() => dedupeWarnings(topAlerts), [topAlerts]);
 
   // Load Data
   const fetchDashboard = async () => {
@@ -145,6 +241,28 @@ const DashboardPage = () => {
     try {
       const res = await getDashboardSummary();
       setData(res);
+      // fetch managers for modal
+      try {
+        const mgrs = await getManagers();
+        setManagers(Array.isArray(mgrs) ? mgrs : (mgrs?.data || []));
+      } catch (e) {
+        console.warn('Không lấy được danh sách managers', e.message);
+      }
+      try {
+        const alerts = await getAlerts('', {
+          sort: alertSort,
+          days: alertDays === 'all' ? undefined : Number(alertDays)
+        });
+        setTopAlerts(Array.isArray(alerts) ? alerts : []);
+      } catch (e) {
+        console.warn('Không lấy được cảnh báo', e.message);
+      }
+      try {
+        const workload = await getWorkerWorkload();
+        setWorkerWorkload(Array.isArray(workload) ? workload : []);
+      } catch (e) {
+        console.warn('Không lấy được thống kê workload', e.message);
+      }
     } catch (err) {
       setError(err.message || 'Có lỗi xảy ra khi tải dữ liệu');
     } finally {
@@ -154,7 +272,7 @@ const DashboardPage = () => {
 
   useEffect(() => {
     fetchDashboard();
-  }, []);
+  }, [alertSort, alertDays]);
 
   // Helper hiển thị Toast tạm thời
   const showToast = (text, type = 'success') => {
@@ -172,16 +290,16 @@ const DashboardPage = () => {
     try {
       if (modalConfig.mode === 'add') {
         const payload = { 
-          ma_khu_vuc: formData.ma_khu_vuc, 
+          ma_khu_vuc: formData.ma_khu_vuc || undefined, 
           loai_thuy_san: formData.loai_thuy_san, 
-          ma_nguoi_dung_quan_ly: user?.id 
+          ma_nguoi_dung_quan_ly: formData.ma_nguoi_dung_quan_ly || null
         };
         await addZone(payload);
         showToast('Thêm khu vực thành công!');
       } else {
         const payload = { 
           loai_thuy_san: formData.loai_thuy_san, 
-          ma_nguoi_dung_quan_ly: user?.id 
+          ma_nguoi_dung_quan_ly: formData.ma_nguoi_dung_quan_ly || null
         };
         await updateZone(formData.ma_khu_vuc, payload);
         showToast('Cập nhật khu vực thành công!');
@@ -331,6 +449,121 @@ const DashboardPage = () => {
         </div>
       )}
 
+      {/* SECTION 2B: TOP WARNINGS */}
+      <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 mb-8">
+        <div className="flex justify-between items-center gap-3 mb-4">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-800">Cảnh báo nổi bật</h3>
+            <p className="text-sm text-gray-500">Hiển thị toàn bộ cảnh báo theo bộ lọc ngày và mức độ.</p>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap justify-end">
+            <select value={alertDays} onChange={(e) => setAlertDays(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-lg text-sm">
+              <option value="all">Tất cả ngày</option>
+              <option value="7">7 ngày</option>
+              <option value="30">30 ngày</option>
+              <option value="90">90 ngày</option>
+            </select>
+            <select value={alertSort} onChange={(e) => setAlertSort(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-lg text-sm">
+              <option value="urgent">Cần xử lý gấp</option>
+              <option value="newest">Mới nhất</option>
+            </select>
+            <button type="button" onClick={() => window.location.assign('/alerts')} className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-medium">
+              Xem toàn bộ
+            </button>
+          </div>
+        </div>
+        <div className="table-wrap" style={{ maxHeight: 280, overflowY: 'auto', borderRadius: 12 }}>
+          <table>
+            <thead>
+              <tr>
+                <th>Thời gian</th>
+                <th>Thiết bị</th>
+                <th>Mô tả</th>
+                <th>Mức độ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleTopAlerts.length === 0 ? (
+                <tr><td colSpan="4" style={{ padding: 16, textAlign: 'center' }}>Chưa có cảnh báo.</td></tr>
+              ) : visibleTopAlerts.map((log) => {
+                const meta = parseWarningMeta(log);
+                const severity = getWarningSeverityLabel(meta.severity);
+                return (
+                  <tr key={log.ma_log}>
+                    <td>{new Date(log.thoi_gian_khoi_tao).toLocaleString('vi-VN')}</td>
+                    <td>{meta.device || meta.sensorId || '-'}</td>
+                    <td>{meta.description || log.mo_ta}</td>
+                    <td>
+                      <span style={{ padding: '4px 10px', borderRadius: 999, color: '#fff', background: severity.color }}>
+                        {severity.label}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* SECTION 2C: WORKER WORKLOAD */}
+      {workerWorkload.length > 0 && (
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 mb-8 mt-8">
+          <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+            <Activity className="mr-2 text-purple-600" size={20} /> Phân công Công nhân
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {workerWorkload.map((worker) => (
+              <div key={worker.ma_nguoi_dung} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
+                <div className="flex justify-between items-start mb-3">
+                  <div>
+                    <h4 className="font-semibold text-gray-800">{worker.ten_dang_nhap}</h4>
+                    <p className="text-xs text-gray-500">{worker.role_name || 'Công nhân'}</p>
+                  </div>
+                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                    worker.pond_count > 0 
+                      ? 'bg-green-100 text-green-700' 
+                      : 'bg-gray-100 text-gray-600'
+                  }`}>
+                    {worker.pond_count} ao
+                  </span>
+                </div>
+
+                {/* Assigned Ponds */}
+                <div className="mb-3">
+                  {worker.assigned_ponds && worker.assigned_ponds.length > 0 ? (
+                    <div className="space-y-1">
+                      {worker.assigned_ponds.map((pond) => (
+                        <div key={pond.ma_ao_nuoi} className="text-sm p-2 bg-gray-50 rounded border-l-2 border-blue-500">
+                          <p className="font-medium text-gray-700">{pond.ma_ao_nuoi}</p>
+                          <p className="text-xs text-gray-500">{pond.loai_thuy_san} • {pond.dien_tich?.toLocaleString()}m²</p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-500 italic">Chưa được gán ao nào</p>
+                  )}
+                </div>
+
+                {/* Unacknowledged Alerts */}
+                <div className="pt-3 border-t border-gray-200">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-gray-600">Cảnh báo chưa xử lý:</span>
+                    <span className={`font-semibold text-lg ${
+                      worker.unacknowledged_alerts > 0 
+                        ? 'text-red-600' 
+                        : 'text-green-600'
+                    }`}>
+                      {worker.unacknowledged_alerts}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* SECTION 3: BẢNG DANH SÁCH KHU VỰC NÂNG CẤP */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
         {/* Table Toolbar */}
@@ -375,6 +608,7 @@ const DashboardPage = () => {
                 <th className="p-4 font-semibold cursor-pointer hover:bg-gray-100" onClick={() => handleSort('LoaiHaiSan')}>
                   <div className="flex items-center">Loại Thủy Sản {sortConfig.key === 'LoaiHaiSan' && (sortConfig.direction === 'asc' ? <ChevronUp size={16}/> : <ChevronDown size={16}/>)}</div>
                 </th>
+                <th className="p-4 font-semibold">Người Quản Lý</th>
                 <th className="p-4 font-semibold cursor-pointer hover:bg-gray-100" onClick={() => handleSort('so_ao')}>
                   <div className="flex items-center">Số Ao {sortConfig.key === 'so_ao' && (sortConfig.direction === 'asc' ? <ChevronUp size={16}/> : <ChevronDown size={16}/>)}</div>
                 </th>
@@ -406,6 +640,7 @@ const DashboardPage = () => {
                       {zone.KhuVuc_ID}
                     </td>
                     <td className="p-4 text-gray-700">{zone.LoaiHaiSan}</td>
+                    <td className="p-4 text-gray-700">{zone.manager || zone.ma_nguoi_dung_quan_ly || '-'}</td>
                     <td className="p-4 text-gray-700">{zone.so_ao || 0}</td>
                     <td className="p-4 text-gray-700">{(zone.tong_dien_tich || 0).toLocaleString()}</td>
                     <td className="p-4 text-right">
@@ -452,6 +687,8 @@ const DashboardPage = () => {
         onSubmit={handleSubmitZone}
         initialData={modalConfig.data}
         isLoading={actionLoading}
+        managers={managers}
+        suggestedZoneId={suggestedZoneId}
       />
     </div>
   );
