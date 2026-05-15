@@ -26,7 +26,7 @@ import {
   removePondWorker,
   updatePondWorkerRole
 } from '../services/api';
-import { dedupeWarnings, getWarningSeverityLabel, parseWarningMeta, toWorkerName } from '../utils/warning';
+import { normalizeAlertCollection } from '../utils/warning';
 
 const SENSOR_SEVERITY_ORDER = {
   critical: 3,
@@ -182,7 +182,7 @@ const PondDetailPage = () => {
   const [workerForm, setWorkerForm] = useState({ ma_nguoi_dung: '', vai_tro: 'PRIMARY' });
   const [workerBusy, setWorkerBusy] = useState(false);
 
-  const visibleAlerts = useMemo(() => dedupeWarnings(alerts), [alerts]);
+  const visibleAlerts = useMemo(() => normalizeAlertCollection(alerts), [alerts]);
   const [sensorFilter, setSensorFilter] = useState('all');
   const [sensorSort, setSensorSort] = useState('severity');
   const [historyFilter, setHistoryFilter] = useState('all');
@@ -809,15 +809,13 @@ const handleDeleteFormula = async (formulaId) => {
               </thead>
               <tbody>
                 {visibleAlerts.map((item, index) => {
-                  const meta = parseWarningMeta(item);
-                  const severityLabel = getWarningSeverityLabel(meta.severity);
                   return (
-                    <tr key={item.ma_log}>
+                    <tr key={item.alertKey}>
                       <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{index + 1}</td>
-                      <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{meta.device || meta.sensorId || '-'}</td>
-                      <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{meta.areaText || '-'}</td>
-                      <td style={{ padding: '8px', borderBottom: '1px solid #eee', maxWidth: 360 }}>{meta.description || item.mo_ta}</td>
-                      <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{toWorkerName(item)}</td>
+                      <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{item.displayDevice}</td>
+                      <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{item.displayLocation}</td>
+                      <td style={{ padding: '8px', borderBottom: '1px solid #eee', maxWidth: 360 }}>{item.displayDescription}</td>
+                      <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{item.displayWorker}</td>
                       <td style={{ padding: '8px', borderBottom: '1px solid #eee', display: 'flex', gap: 8, alignItems: 'center' }}>
                         <span>{item.acknowledged ? 'Đã xử lý' : 'Chưa xử lý'}</span>
                         {!item.acknowledged && hasPermission('alerts:ack') && (
@@ -827,8 +825,8 @@ const handleDeleteFormula = async (formulaId) => {
                         )}
                       </td>
                       <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>
-                        <span style={{ padding: '4px 10px', borderRadius: 999, color: '#fff', background: severityLabel.color }}>
-                          {severityLabel.label}
+                        <span style={{ padding: '4px 10px', borderRadius: 999, color: '#fff', background: item.severityColor }}>
+                          {item.severityLabel}
                         </span>
                       </td>
                     </tr>

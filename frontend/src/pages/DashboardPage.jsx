@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { 
   getDashboardSummary, addZone, updateZone, deleteZone, getManagers, getAlerts, getWorkerWorkload
 } from '../services/api';
-import { dedupeWarnings, getWarningSeverityLabel, parseWarningMeta } from '../utils/warning';
+import { normalizeAlertCollection } from '../utils/warning';
 import { useAuth } from '../context/AuthContext';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as ChartTooltip, ResponsiveContainer, Legend
@@ -232,7 +232,7 @@ const DashboardPage = () => {
   const canUpdateZone = user?.permissions?.includes('zone:update');
   const canDeleteZone = user?.permissions?.includes('zone:delete');
 
-  const visibleTopAlerts = useMemo(() => dedupeWarnings(topAlerts), [topAlerts]);
+  const visibleTopAlerts = useMemo(() => normalizeAlertCollection(topAlerts), [topAlerts]);
 
   // Load Data
   const fetchDashboard = async () => {
@@ -486,16 +486,14 @@ const DashboardPage = () => {
               {visibleTopAlerts.length === 0 ? (
                 <tr><td colSpan="4" style={{ padding: 16, textAlign: 'center' }}>Chưa có cảnh báo.</td></tr>
               ) : visibleTopAlerts.map((log) => {
-                const meta = parseWarningMeta(log);
-                const severity = getWarningSeverityLabel(meta.severity);
                 return (
-                  <tr key={log.ma_log}>
-                    <td>{new Date(log.thoi_gian_khoi_tao).toLocaleString('vi-VN')}</td>
-                    <td>{meta.device || meta.sensorId || '-'}</td>
-                    <td>{meta.description || log.mo_ta}</td>
+                  <tr key={log.alertKey}>
+                    <td>{log.changedAt ? new Date(log.changedAt).toLocaleString('vi-VN') : '-'}</td>
+                    <td>{log.displayDevice}</td>
+                    <td>{log.displayDescription}</td>
                     <td>
-                      <span style={{ padding: '4px 10px', borderRadius: 999, color: '#fff', background: severity.color }}>
-                        {severity.label}
+                      <span style={{ padding: '4px 10px', borderRadius: 999, color: '#fff', background: log.severityColor }}>
+                        {log.severityLabel}
                       </span>
                     </td>
                   </tr>
