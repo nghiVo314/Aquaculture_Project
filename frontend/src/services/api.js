@@ -48,6 +48,16 @@ export const getAlerts = (status = '', options = {}) => {
     const query = params.toString();
     return request(`/alerts${query ? `?${query}` : ''}`);
 };
+export const getAlertHistory = (options = {}) => {
+    const params = new URLSearchParams();
+    if (options.pondId) params.set('pond_id', options.pondId);
+    if (options.sensorId) params.set('sensor_id', options.sensorId);
+    if (options.status) params.set('status', options.status);
+    if (options.sort) params.set('sort', options.sort);
+    if (options.days) params.set('days', String(options.days));
+    if (options.limit) params.set('limit', String(options.limit));
+    return request(`/alerts/history${params.toString() ? `?${params.toString()}` : ''}`);
+};
 export const getPondAlerts = (pondId, status = 'unacknowledged', options = {}) => {
     const params = new URLSearchParams();
     params.set('pond_id', pondId);
@@ -68,6 +78,7 @@ export const updateZone = (id, payload) => request(`/zones/${id}`, { method: 'PU
 export const deleteZone = (id) => request(`/zones/${id}`, { method: 'DELETE' });
 
 export const getPonds = () => request('/ponds');
+export const getGatewayInit = () => request('/ponds/gateway-init');
 export const addPond = (payload) => request('/ponds', { method: 'POST', body: JSON.stringify(payload) });
 export const updatePond = (id, payload) => request(`/ponds/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
 export const deletePond = (id) => request(`/ponds/${id}`, { method: 'DELETE' });
@@ -77,8 +88,11 @@ export const addStation = (payload) => request('/devices/stations', { method: 'P
 export const deleteStation = (id) => request(`/devices/stations/${id}`, { method: 'DELETE' });
 
 export const getDevices = () => request('/devices/inventory');
+export const getDevicesByZone = (zoneId) => request(`/devices/inventory/by-zone/${zoneId}`);
 export const addDevice = (payload) => request('/devices/inventory', { method: 'POST', body: JSON.stringify(payload) });
 export const deleteDevice = (id) => request(`/devices/inventory/${id}`, { method: 'DELETE' });
+export const getDeviceOverview = () => request('/devices/overview');
+export const getDeviceHistory = (deviceId) => request(`/devices/inventory/${deviceId}/history`);
 
 export const getSystemLogs = () => request('/logs');
 

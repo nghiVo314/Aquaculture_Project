@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+﻿import React, { useEffect, useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import SensorChart from '../components/SensorChart';
@@ -17,6 +17,7 @@ import {
   addFeedingFormula,
   deleteFeedingFormula,
   getPondAlerts,
+  getAlertHistory,
   acknowledgeAlert,
   suggestSchedules,
   getThresholdHistory,
@@ -38,24 +39,24 @@ const SENSOR_SEVERITY_ORDER = {
 
 const SENSOR_INSIGHTS = {
   TEMP: {
-    high: { device: 'FAN', action: 'Bật quạt để hạ nhiệt', note: 'Nhiệt độ đang cao hơn ngưỡng an toàn.' },
-    low: { device: 'FAN', action: 'Bật quạt theo chu kỳ / kiểm tra nước vào', note: 'Nhiệt độ đang thấp hơn ngưỡng.' }
+    high: { device: 'FAN', action: 'Bat quat de ha nhiet', note: 'Nhiet do dang cao hon nguong an toan.' },
+    low: { device: 'FAN', action: 'Bat quat theo chu ky / kiem tra nuoc vao', note: 'Nhiet do dang thap hon nguong.' }
   },
   DO: {
-    high: { device: 'PUMP', action: 'Đã ổn định', note: 'Oxy hòa tan đang tốt.' },
-    low: { device: 'PUMP', action: 'Bật sục khí / tăng oxy', note: 'Oxy hòa tan đang thấp.' }
+    high: { device: 'PUMP', action: 'Dieu chinh bo sung', note: 'Oxy hoa tan dang tang.' },
+    low: { device: 'PUMP', action: 'Bat suc khi / tang oxy', note: 'Oxy hoa tan dang thap.' }
   },
   LIGHT: {
-    high: { device: 'FAN', action: 'Giảm chiếu sáng / che bớt nắng', note: 'Ánh sáng đang quá cao.' },
-    low: { device: 'FAN', action: 'Kiểm tra nguồn sáng', note: 'Ánh sáng đang thấp.' }
+    high: { device: 'PUMP', action: 'Bat bom / thay nuoc theo cau hinh', note: 'Anh sang dang qua cao.' },
+    low: { device: 'PUMP', action: 'Tat bom khi anh sang ve nguong an toan', note: 'Anh sang dang thap.' }
   },
   PH: {
-    high: { device: 'PUMP', action: 'Thay nước / điều chỉnh pH', note: 'pH đang cao hơn ngưỡng.' },
-    low: { device: 'PUMP', action: 'Bổ sung nước / điều chỉnh pH', note: 'pH đang thấp hơn ngưỡng.' }
+    high: { device: 'PUMP', action: 'Thay nuoc / dieu chinh pH', note: 'pH dang cao hon nguong.' },
+    low: { device: 'PUMP', action: 'Bo sung nuoc / dieu chinh pH', note: 'pH dang thap hon nguong.' }
   },
   SALINITY: {
-    high: { device: 'PUMP', action: 'Thay nước / giảm độ mặn', note: 'Độ mặn đang cao.' },
-    low: { device: 'PUMP', action: 'Bổ sung muối / kiểm tra nguồn nước', note: 'Độ mặn đang thấp.' }
+    high: { device: 'PUMP', action: 'Thay nuoc / giam do man', note: 'Do man dang cao.' },
+    low: { device: 'PUMP', action: 'Bo sung muoi / kiem tra nguon nuoc', note: 'Do man dang thap.' }
   }
 };
 
@@ -64,25 +65,69 @@ const formatNumber = (value) => {
   return Number.isFinite(numeric) ? numeric.toFixed(1) : '--';
 };
 
+const RULE_ACTION_OPTIONS = [
+  { value: 'HOAT_DONG', label: 'Bat thiet bi' },
+  { value: 'TAT', label: 'Tat thiet bi' }
+];
+
+const formatRuleActionLabel = (value) => (
+  String(value || '').toUpperCase() === 'TAT' ? 'Tat thiet bi' : 'Bat thiet bi'
+);
+
+const getActuatorRecommendation = (sensor, direction) => {
+  const actuatorType = String(sensor.loai_thiet_bi_dieu_khien || '').toUpperCase();
+  const actuatorId = sensor.ma_tb_dieu_khien || actuatorType || 'N/A';
+  const actionStatus = String(
+    direction === 'high' ? sensor.high_action : sensor.low_action
+  || 'HOAT_DONG').toUpperCase();
+  const actionLabel = actionStatus === 'TAT' ? 'tat thiet bi' : 'bat thiet bi';
+
+  const actuatorMap = {
+    FAN: {
+      high: { note: 'Quat la thiet bi xu ly chinh cua rule nay khi cam bien vuot nguong cao.' },
+      low: { note: 'Quat la thiet bi xu ly chinh cua rule nay khi cam bien xuong duoi nguong thap.' }
+    },
+    PUMP: {
+      high: { note: 'Bom dang duoc dung lam thiet bi xu ly khi thong so vuot nguong cao.' },
+      low: { note: 'Bom dang duoc dung lam thiet bi xu ly khi thong so xuong thap.' }
+    },
+    FEEDER: {
+      high: { note: 'May cho an duoc gan vao rule nay khi moi truong vuot nguong cao.' },
+      low: { note: 'May cho an duoc gan vao rule nay khi moi truong xuong nguong thap.' }
+    }
+  };
+
+  const fallback = { note: 'He thong dang xu ly theo thiet bi dieu khien duoc gan trong rule.' };
+  return {
+    actuatorId,
+    actionStatus,
+    actionLabel,
+    action: `${actionLabel} ${actuatorId}`,
+    ...(actuatorMap[actuatorType]?.[direction] || fallback)
+  };
+};
+
 const getSensorMeta = (sensor) => {
   const value = Number(sensor.latest_value);
   const min = Number(sensor.min_value);
   const max = Number(sensor.max_value);
   const typeKey = String(sensor.LoaiCamBien || '').toUpperCase();
-  const insight = SENSOR_INSIGHTS[typeKey] || {};
+  const unknownRecommendation = getActuatorRecommendation(sensor, 'high');
 
   if (!Number.isFinite(value) || !Number.isFinite(min) || !Number.isFinite(max)) {
     return {
       statusKey: 'unknown',
-      label: 'Chưa có dữ liệu',
+      label: 'Chua co du lieu',
       badgeClass: 'bg-slate-500',
       cardClass: 'border-slate-200 bg-slate-50',
       valueClass: 'text-slate-700 bg-slate-100',
-      note: 'Đang chờ dữ liệu cảm biến.',
-      actionText: 'Chưa thể đề xuất hành động',
-      deviceText: 'Chưa xác định',
+      note: 'Dang cho du lieu cam bien.',
+      actionText: 'Chua the de xuat hanh dong',
+      deviceText: 'Chua xac dinh',
       displayValue: '--',
-      detailText: `Ngưỡng an toàn: ${sensor.min_value} - ${sensor.max_value}`
+      detailText: `Nguong an toan: ${sensor.min_value} - ${sensor.max_value}`,
+      conditionText: 'Chua co du lieu de so sanh voi nguong canh bao.',
+      toggleText: 'Chua xac dinh duoc can bat hay tat thiet bi nao.'
     };
   }
 
@@ -100,35 +145,35 @@ const getSensorMeta = (sensor) => {
 
   const statusMap = {
     critical: {
-      label: 'Nguy hiểm',
+      label: 'Nguy hiem',
       badgeClass: 'bg-red-600',
       badgeColor: '#dc2626',
       cardClass: 'border-red-200 bg-red-50',
       valueClass: 'text-red-700 bg-red-100'
     },
     warning: {
-      label: 'Cảnh báo',
+      label: 'Canh bao',
       badgeClass: 'bg-orange-500',
       badgeColor: '#f97316',
       cardClass: 'border-orange-200 bg-orange-50',
       valueClass: 'text-orange-700 bg-orange-100'
     },
     caution: {
-      label: 'Cần chú ý',
+      label: 'Can chu y',
       badgeClass: 'bg-amber-400',
       badgeColor: '#eab308',
       cardClass: 'border-amber-200 bg-amber-50',
       valueClass: 'text-amber-700 bg-amber-100'
     },
     normal: {
-      label: 'Ổn định',
+      label: 'On dinh',
       badgeClass: 'bg-emerald-500',
       badgeColor: '#16a34a',
       cardClass: 'border-emerald-200 bg-emerald-50',
       valueClass: 'text-emerald-700 bg-emerald-100'
     },
     unknown: {
-      label: 'Chưa rõ',
+      label: 'Chua ro',
       badgeClass: 'bg-slate-400',
       badgeColor: '#94a3b8',
       cardClass: 'border-slate-200 bg-slate-50',
@@ -137,7 +182,7 @@ const getSensorMeta = (sensor) => {
   };
 
   const direction = value > max ? 'high' : 'low';
-  const recommendation = insight[direction] || { device: 'N/A', action: 'Theo dõi thêm', note: 'Chưa có khuyến nghị cụ thể.' };
+  const recommendation = getActuatorRecommendation(sensor, direction);
 
   return {
     statusKey,
@@ -148,23 +193,33 @@ const getSensorMeta = (sensor) => {
     valueClass: statusMap[statusKey].valueClass,
     note: recommendation.note,
     actionText: recommendation.action,
-    deviceText: recommendation.device,
+    deviceText: recommendation.actuatorId,
     displayValue: formatNumber(value),
-    detailText: `Ngưỡng an toàn: ${sensor.min_value} - ${sensor.max_value}`,
+    detailText: `Nguong an toan: ${sensor.min_value} - ${sensor.max_value}`,
+    conditionText: value > max
+      ? `${typeKey} dang lon hon nguong toi da, moi truong ao dang vuot muc an toan.`
+      : value < min
+        ? `${typeKey} dang thap hon nguong toi thieu, moi truong ao dang thieu dieu kien an toan.`
+        : `${typeKey} dang nam trong khoang an toan cua ao.`,
+    toggleText: value > max
+      ? `Neu tiep tuc tang, he thong nen ${recommendation.action.toLowerCase()} bang thiet bi ${recommendation.actuatorId}.`
+      : value < min
+        ? `Neu tiep tuc giam, he thong nen ${recommendation.action.toLowerCase()} bang thiet bi ${recommendation.actuatorId}.`
+        : `Hien chua can bat hoac tat ${recommendation.actuatorId}; tiep tuc theo doi tu dong.`,
     deviation: outOfRange
-      ? `Chênh ${Math.abs(value < min ? min - value : value - max).toFixed(1)}`
-      : `Còn cách biên ${Math.min(value - min, max - value).toFixed(1)}`
+      ? `Lech ${Math.abs(value < min ? min - value : value - max).toFixed(1)}`
+      : `Con cach bien ${Math.min(value - min, max - value).toFixed(1)}`
   };
 };
 
-const getHistoryStatusLabel = (row) => (Number(row.da_sua) === 1 ? 'Đã sửa' : 'Chưa sửa');
+const getHistoryStatusLabel = (row) => (Number(row.da_sua) === 1 ? 'Da sua' : 'Chua sua');
 
 const PondDetailPage = () => {
-  const { id } = useParams(); // id chính là ma_ao_nuoi
+  const { id } = useParams(); // id chinh la ma_ao_nuoi
   const navigate = useNavigate();
   const { hasPermission } = useAuth();
 
-  // States Dữ liệu
+  // States du lieu
   const [pondData, setPondData] = useState(null);
   const [pondConfig, setPondConfig] = useState(null);
   const [devices, setDevices] = useState([]);
@@ -177,6 +232,7 @@ const PondDetailPage = () => {
   const [suggestedSchedules, setSuggestedSchedules] = useState([]);
   const [suggestLoading, setSuggestLoading] = useState(false);
   const [thresholdHistory, setThresholdHistory] = useState([]);
+  const [alertHistory, setAlertHistory] = useState([]);
   const [pondWorkers, setPondWorkers] = useState([]);
   const [workerOptions, setWorkerOptions] = useState([]);
   const [workerForm, setWorkerForm] = useState({ ma_nguoi_dung: '', vai_tro: 'PRIMARY' });
@@ -189,68 +245,66 @@ const PondDetailPage = () => {
   const [historySort, setHistorySort] = useState('newest');
   const canManageWorkers = hasPermission('pond:manage:workers');
 
-  // States Form
+  // States form
   const [scheduleForm, setScheduleForm] = useState({ ma_tb_dieu_khien: '', start_time: '', end_time: '', ma_cong_thuc: '' });
   const [formulaForm, setFormulaForm] = useState({ ma_cong_thuc: '', ti_le_cho_an: '', thong_tin_bo_sung: '' });
   const [error, setError] = useState('');
 
-  // 1. TẢI VÀ LỌC DỮ LIỆU BAN ĐẦU THEO AO CỤ THỂ
+  const loadPondStructure = async () => {
+    const [configData, allPonds, allDevices, allFormulas, allWorkers, currentWorkers] = await Promise.all([
+      getPondConfig(id),
+      getPonds(),
+      getDevices(),
+      getFeedingFormulas(),
+      getWorkers().catch(() => []),
+      getPondWorkers(id).catch(() => [])
+    ]);
+
+    setPondConfig(configData);
+
+    const currentPond = allPonds.find((p) => p.ma_ao_nuoi === id);
+    if (!currentPond) {
+      throw new Error('Không tìm thấy thông tin ao nuôi.');
+    }
+
+    setPondData(currentPond);
+    setPondMode(currentPond.che_do || 'AUTO');
+
+    const currentPondDevices = allDevices.filter((d) => d.ma_tram === currentPond.ma_tram);
+    setDevices(currentPondDevices);
+    setFormulas(Array.isArray(allFormulas) ? allFormulas : (allFormulas?.data || []));
+    setWorkerOptions(Array.isArray(allWorkers) ? allWorkers : (allWorkers?.data || []));
+    setPondWorkers(Array.isArray(currentWorkers) ? currentWorkers : (currentWorkers?.data || []));
+
+    return currentPondDevices;
+  };
+
+  // 1. Tai va load du lieu ban dau theo ao cu the
   useEffect(() => {
     let intervalId;
 
     const fetchInitialData = async () => {
       try {
-        // Tải config cảm biến
-        const configData = await getPondConfig(id);
-        setPondConfig(configData);
-
-        // Tải danh sách ao, thiết bị và công thức
-        const [allPonds, allDevices, allFormulas] = await Promise.all([
-          getPonds(),
-          getDevices(),
-          getFeedingFormulas()
-        ]);
-
-        // Tìm ao hiện tại
-        const currentPond = allPonds.find(p => p.ma_ao_nuoi === id);
-        if (!currentPond) {
-          setError('Không tìm thấy thông tin ao nuôi!');
-          return;
-        }
-        setPondData(currentPond);
-        setPondMode(currentPond.che_do || 'AUTO');
-
-        // Lọc thiết bị thuộc trạm của ao này
-        const currentPondDevices = allDevices.filter(d => d.ma_tram === currentPond.ma_tram);
-        setDevices(currentPondDevices);
-
-        // Set danh sách công thức
-        setFormulas(Array.isArray(allFormulas) ? allFormulas : (allFormulas?.data || []));
-
-        const [allWorkers, currentWorkers] = await Promise.all([
-          getWorkers().catch(() => []),
-          getPondWorkers(id).catch(() => [])
-        ]);
-        setWorkerOptions(Array.isArray(allWorkers) ? allWorkers : (allWorkers?.data || []));
-        setPondWorkers(Array.isArray(currentWorkers) ? currentWorkers : (currentWorkers?.data || []));
-
-        // Tải lịch trình & lịch sử cho các thiết bị của ao này
+        const currentPondDevices = await loadPondStructure();
         await refreshDynamicData(currentPondDevices);
         await loadPondAlerts();
         await loadThresholdHistory();
+        await loadAlertHistory();
 
-        // Đặt interval cập nhật dữ liệu động (Cảm biến & Lịch sử) mỗi 5s
-        intervalId = setInterval(() => {
-          getPondConfig(id).then(setPondConfig).catch(console.error);
-          refreshDynamicData(currentPondDevices);
-          loadPondAlerts();
-          loadThresholdHistory();
-          getPondWorkers(id).then((rows) => setPondWorkers(Array.isArray(rows) ? rows : (rows?.data || []))).catch(() => {});
+        intervalId = setInterval(async () => {
+          try {
+            const refreshedDevices = await loadPondStructure();
+            await refreshDynamicData(refreshedDevices);
+            await loadPondAlerts();
+            await loadThresholdHistory();
+            await loadAlertHistory();
+          } catch (pollError) {
+            console.error('Lỗi làm mới cấu trúc ao:', pollError);
+          }
         }, 5000);
-
       } catch (err) {
-        console.error("Lỗi tải dữ liệu ao:", err);
-        setError("Có lỗi xảy ra khi tải dữ liệu.");
+        console.error('Lỗi tải dữ liệu ao:', err);
+        setError('Có lỗi xảy ra khi tải dữ liệu.');
       }
     };
 
@@ -261,7 +315,7 @@ const PondDetailPage = () => {
     };
   }, [id, alertsSort]);
 
-  // Hàm tải lại Lịch trình & Lịch sử cho ăn (được lọc theo thiết bị của ao)
+  // Hﾃm t蘯｣i l蘯｡i L盻議h trﾃｬnh & L盻議h s盻ｭ cho ﾄハ (ﾄ柁ｰ盻｣c l盻皇 theo thi蘯ｿt b盻・c盻ｧa ao)
   const refreshDynamicData = async (pondDevices) => {
     try {
       const deviceIds = pondDevices.map(d => d.ma_thiet_bi);
@@ -276,7 +330,7 @@ const PondDetailPage = () => {
       setSchedules(schedArray.filter(s => deviceIds.includes(s.ma_tb_dieu_khien || s.ThietBiTaiBien_ID)));
       setFeedingHistory(histArray.filter(h => deviceIds.includes(h.ma_tb_dieu_khien)));
     } catch (err) {
-      console.error("Lỗi refresh dữ liệu động:", err);
+      console.error('Lỗi refresh dữ liệu động:', err);
     }
   };
 
@@ -299,7 +353,17 @@ const PondDetailPage = () => {
     }
   };
 
-  // 2. CÁC HÀM XỬ LÝ (HANDLERS)
+  const loadAlertHistory = async () => {
+    try {
+      const rows = await getAlertHistory({ pondId: id, limit: 50 });
+      setAlertHistory(Array.isArray(rows) ? rows.sort((a, b) => new Date(b.thoi_gian_khoi_tao || 0) - new Date(a.thoi_gian_khoi_tao || 0)) : []);
+    } catch (err) {
+      console.error('Lỗi tải lịch sử cảnh báo ao:', err);
+      setAlertHistory([]);
+    }
+  };
+
+  // 2. Cﾃ， HﾃM X盻ｬ Lﾃ・(HANDLERS)
   const handleToggleMode = async () => {
     const newMode = pondMode === 'AUTO' ? 'MANUAL' : 'AUTO';
     try {
@@ -307,13 +371,13 @@ const PondDetailPage = () => {
       setPondMode(newMode);
       alert(`Đã chuyển ao ${id} sang chế độ ${newMode}`);
     } catch (err) {
-      alert("Lỗi chuyển chế độ: " + err.message);
+      alert('Lỗi chuyển chế độ: ' + err.message);
     }
   };
 
   const handleToggleDevice = async (deviceId, currentStatus) => {
     if (pondMode === 'AUTO') {
-      alert("Vui lòng chuyển ao sang chế độ MANUAL trước khi điều khiển thủ công!");
+      alert('Vui lòng chuyển ao sang chế độ MANUAL trước khi điều khiển thủ công.');
       return;
     }
     const newStatus = currentStatus === 'HOAT_DONG' ? 'TAT' : 'HOAT_DONG';
@@ -325,10 +389,30 @@ const PondDetailPage = () => {
     }
   };
 
-  const handleSaveRule = async (LoaiCamBien, min_value, max_value) => {
+  const handleSetDeviceStatus = async (deviceId, nextStatus) => {
+    if (pondMode === 'AUTO') {
+      alert("Vui l・・ｽｲng chuy逶ｻ繝・ao sang ch陂ｯ・ｿ ・・ｻ幢ｽｻ繝ｻMANUAL tr・・ｽｰ逶ｻ雖ｩ khi ・・ｨｴ逶ｻ縲・khi逶ｻ繝・th逶ｻ・ｧ c・・ｽｴng!");
+      return;
+    }
     try {
-      await updatePondConfig(id, { LoaiCamBien, min_value: Number(min_value), max_value: Number(max_value) });
-      alert(`Đã cập nhật ngưỡng cho ${LoaiCamBien}`);
+      await updateDeviceStatus(deviceId, nextStatus);
+      setDevices(devices.map(d => d.ma_thiet_bi === deviceId ? { ...d, trang_thai: nextStatus } : d));
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  const handleSaveRule = async (payload) => {
+    try {
+      await updatePondConfig(id, {
+        ...payload,
+        min_value: Number(payload.min_value),
+        max_value: Number(payload.max_value)
+      });
+      alert(`Đã cập nhật rule cho ${payload.LoaiCamBien || payload.ma_cam_bien}`);
+      const updatedConfig = await getPondConfig(id);
+      setPondConfig(updatedConfig);
+      await loadThresholdHistory();
     } catch (err) {
       alert(err.message);
     }
@@ -340,7 +424,7 @@ const PondDetailPage = () => {
       await addSchedule(scheduleForm);
       setScheduleForm({ ma_tb_dieu_khien: '', start_time: '', end_time: '', ma_cong_thuc: '' });
       refreshDynamicData(devices);
-      alert('Thêm lịch trình thành công!');
+      alert('Thêm lịch trình thành công.');
     } catch (err) {
       alert('Lỗi thêm lịch trình: ' + err.message);
     }
@@ -393,6 +477,7 @@ const PondDetailPage = () => {
     try {
       await acknowledgeAlert(logId);
       await loadPondAlerts();
+      await loadAlertHistory();
     } catch (err) {
       alert('Không thể xác nhận cảnh báo: ' + err.message);
     }
@@ -450,7 +535,7 @@ const PondDetailPage = () => {
       setFormulaForm({ ma_cong_thuc: '', ti_le_cho_an: '', thong_tin_bo_sung: '' });
       const newFormulas = await getFeedingFormulas();
       setFormulas(Array.isArray(newFormulas) ? newFormulas : (newFormulas?.data || []));
-      alert('Thêm công thức thành công!');
+      alert('Thêm công thức thành công.');
     } catch (err) {
       alert('Lỗi thêm công thức: ' + err.message);
     }
@@ -461,10 +546,10 @@ const handleDeleteFormula = async (formulaId) => {
   
   try {
     await deleteFeedingFormula(formulaId);
-    // Cập nhật lại danh sách công thức sau khi xóa
+    // C蘯ｭp nh蘯ｭt l蘯｡i danh sﾃ｡ch cﾃｴng th盻ｩc sau khi xﾃｳa
     const newFormulas = await getFeedingFormulas();
     setFormulas(Array.isArray(newFormulas) ? newFormulas : (newFormulas?.data || []));
-    alert('Đã xóa công thức thành công!');
+    alert('Đã xóa công thức thành công.');
   } catch (err) {
     alert('Không thể xóa công thức: ' + err.message);
   }
@@ -521,7 +606,7 @@ const handleDeleteFormula = async (formulaId) => {
       <div style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <button onClick={() => navigate(-1)} style={{ padding: '8px 16px', cursor: 'pointer' }}>← Quay lại</button>
         <div style={{ textAlign: 'right' }}>
-          <h2 style={{ margin: 0 }}>Quản lý Ao: {id} {pondData ? `(Trạm ${pondData.ma_tram})` : ''}</h2>
+          <h2 style={{ margin: 0 }}>Quản lý ao: {id} {pondData ? `(Trạm ${pondData.ma_tram})` : ''}</h2>
           <div style={{ fontSize: '0.9em', color: '#6b7280', marginTop: '4px' }}>
             Worker phụ trách: {pondData?.nguoi_phu_trach || 'Chưa gán'}
           </div>
@@ -530,7 +615,7 @@ const handleDeleteFormula = async (formulaId) => {
 
       <div className="card" style={{ padding: '20px', border: '1px solid #dbeafe', borderRadius: '8px', marginBottom: '20px', background: '#f8fbff' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
-          <h3 style={{ margin: 0 }}>Phân công Worker cho Ao</h3>
+          <h3 style={{ margin: 0 }}>Phân công worker cho ao</h3>
           <span style={{ color: '#6b7280', fontSize: '0.9em' }}>Hỗ trợ nhiều worker trên cùng ao</span>
         </div>
 
@@ -596,7 +681,7 @@ const handleDeleteFormula = async (formulaId) => {
 
       {error && <div style={{ color: 'red', marginBottom: '15px' }}>{error}</div>}
 
-      {/* --- PHẦN 1: GIÁM SÁT CẢM BIẾN --- */}
+      {/* --- PH蘯ｦN 1: GIﾃ｀ Sﾃゝ C蘯｢M BI蘯ｾN --- */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap', marginBottom: '14px' }}>
         <h3 style={{ margin: 0 }}>Giám sát cảm biến</h3>
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
@@ -608,9 +693,9 @@ const handleDeleteFormula = async (formulaId) => {
             <option value="normal">Ổn định</option>
           </select>
           <select value={sensorSort} onChange={(e) => setSensorSort(e.target.value)} style={{ padding: '8px 10px' }}>
-            <option value="severity">Sắp xếp theo mức độ</option>
-            <option value="value">Sắp xếp theo giá trị</option>
-            <option value="name">Sắp xếp theo tên</option>
+            <option value="severity">Sap xep theo muc do</option>
+            <option value="value">Sap xep theo gia tri</option>
+            <option value="name">Sap xep theo ten</option>
           </select>
         </div>
       </div>
@@ -621,7 +706,7 @@ const handleDeleteFormula = async (formulaId) => {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', marginBottom: '12px' }}>
               <div>
                 <strong style={{ fontSize: '1.05em' }}>{sensor.LoaiCamBien}</strong>
-                <div style={{ fontSize: '0.82em', color: '#6b7280', marginTop: '4px' }}>Thiết bị: {sensor.ma_cam_bien}</div>
+                <div style={{ fontSize: '0.82em', color: '#6b7280', marginTop: '4px' }}>Thiết bị {sensor.ma_cam_bien}</div>
               </div>
               <span style={{ fontSize: '0.8em', padding: '6px 10px', borderRadius: '999px', color: '#fff', background: sensor.badgeColor }}
               >
@@ -634,8 +719,10 @@ const handleDeleteFormula = async (formulaId) => {
               </span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                 <div style={{ color: '#374151', fontSize: '0.92em' }}>{sensor.detailText}</div>
+                <div style={{ color: '#334155', fontSize: '0.85em' }}>{sensor.conditionText}</div>
                 <div style={{ color: '#6b7280', fontSize: '0.85em' }}>{sensor.note}</div>
                 <div style={{ color: '#0f5132', fontSize: '0.85em', fontWeight: 600 }}>Tự động kích hoạt: {sensor.deviceText} | {sensor.actionText}</div>
+                <div style={{ color: '#1d4ed8', fontSize: '0.84em' }}>{sensor.toggleText}</div>
               </div>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', marginBottom: '10px', flexWrap: 'wrap' }}>
@@ -708,8 +795,8 @@ const handleDeleteFormula = async (formulaId) => {
 
       <hr style={{ margin: '30px 0', borderColor: '#eee' }} />
 
-      {/* --- PHẦN 2: BẢNG ĐIỀU KHIỂN & TỰ ĐỘNG HÓA --- */}
-      <h3>Bảng Điều khiển Thiết bị</h3>
+      {/* --- PH蘯ｦN 2: B蘯｢NG ﾄ蝕盻U KHI盻・ & T盻ｰ ﾄ雪ｻ朗G Hﾃ鄭 --- */}
+      <h3>Bảng điều khiển thiết bị</h3>
       <div style={{ marginBottom: '20px', padding: '15px', background: '#e3f2fd', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '15px' }}>
         <h4 style={{ margin: 0 }}>Chế độ ao hiện tại:</h4>
         <button 
@@ -719,26 +806,35 @@ const handleDeleteFormula = async (formulaId) => {
           {pondMode === 'AUTO' ? 'TỰ ĐỘNG (AUTO)' : 'THỦ CÔNG (MANUAL)'}
         </button>
         <span style={{ color: '#555', fontSize: '14px' }}>
-          {pondMode === 'AUTO' ? 'Thiết bị tự động chạy theo ngưỡng cảm biến & Lịch trình.' : 'Bạn có toàn quyền bật/tắt thiết bị bên dưới.'}
+          {pondMode === 'AUTO' ? 'Thiết bị tự động chạy theo ngưỡng cảm biến và lịch trình.' : 'Bạn có toàn quyền bật, tắt hoặc bảo trì thiết bị bên dưới.'}
         </span>
       </div>
 
       <div className="grid-two" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '30px' }}>
         {/* Manual Control */}
         <div className="card" style={{ padding: '20px', border: '1px solid #ccc', borderRadius: '8px' }}>
-          <h4>Điều khiển Thủ công</h4>
+          <h4>Điều khiển thủ công</h4>
           <ul style={{ listStyle: 'none', padding: 0 }}>
             {controlDevices.length === 0 && <li>Không có thiết bị điều khiển ở ao này.</li>}
             {controlDevices.map(dev => (
               <li key={dev.ma_thiet_bi} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid #eee' }}>
                 <span>{dev.ma_thiet_bi} ({dev.loai_thiet_bi})</span>
                 {hasPermission('device:status:update') ? (
-                  <button 
-                    onClick={() => handleToggleDevice(dev.ma_thiet_bi, dev.trang_thai)}
-                    style={{ backgroundColor: dev.trang_thai === 'HOAT_DONG' ? '#4CAF50' : '#f44336', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '4px', cursor: 'pointer' }}
-                  >
-                    {dev.trang_thai === 'HOAT_DONG' ? 'ĐANG BẬT' : 'ĐANG TẮT'}
-                  </button>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                    <button
+                      onClick={() => handleToggleDevice(dev.ma_thiet_bi, dev.trang_thai)}
+                      style={{ backgroundColor: dev.trang_thai === 'HOAT_DONG' ? '#4CAF50' : '#f44336', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '4px', cursor: 'pointer' }}
+                    >
+                      {dev.trang_thai === 'HOAT_DONG' ? 'ĐANG BẬT' : 'ĐANG TẮT'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSetDeviceStatus(dev.ma_thiet_bi, dev.trang_thai === 'BAO_TRI' ? 'TAT' : 'BAO_TRI')}
+                      style={{ backgroundColor: dev.trang_thai === 'BAO_TRI' ? '#64748b' : '#f59e0b', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '4px', cursor: 'pointer' }}
+                    >
+                      {dev.trang_thai === 'BAO_TRI' ? 'ĐANG BẢO TRÌ' : 'BẢO TRÌ'}
+                    </button>
+                  </div>
                 ) : (
                   <span style={{ color: '#999' }}>{dev.trang_thai}</span>
                 )}
@@ -749,21 +845,58 @@ const handleDeleteFormula = async (formulaId) => {
 
         {/* Auto Config */}
         <div className="card" style={{ padding: '20px', border: '1px solid #ccc', borderRadius: '8px' }}>
-          <h4>Cấu hình Ngưỡng (AUTO)</h4>
+          <h4>Cấu hình ngưỡng (AUTO)</h4>
           <ul style={{ listStyle: 'none', padding: 0 }}>
             {pondConfig.configs.map(conf => (
-              <li key={conf.ma_rule} style={{ marginBottom: '15px', background: '#f9f9f9', padding: '10px', borderRadius: '6px' }}>
+              <li key={conf.ma_rule || conf.ma_cam_bien} style={{ marginBottom: '15px', background: '#f9f9f9', padding: '10px', borderRadius: '6px' }}>
                 <strong>Cảm biến {conf.LoaiCamBien}</strong>
-                <div style={{ display: 'flex', gap: '10px', marginTop: '10px', alignItems: 'center' }}>
+                <div style={{ marginTop: '6px', color: '#475569', fontSize: '0.86em' }}>
+                  Rule hien tai: {conf.ma_cam_bien} ({conf.LoaiCamBien}) theo doi nguong {conf.min_value ?? '--'} - {conf.max_value ?? '--'}, thiet bi dieu khien {conf.loai_thiet_bi_dieu_khien || conf.ma_tb_dieu_khien || 'chua gan thiet bi'}, duoi min se {formatRuleActionLabel(conf.low_action)}, tren max se {formatRuleActionLabel(conf.high_action)}.
+                </div>
+                <div style={{ display: 'flex', gap: '10px', marginTop: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
                   <label>Min:</label>
-                  <input type="number" step="0.1" defaultValue={conf.min_value} id={`min_${conf.ma_rule}`} style={{ width: '70px' }}/>
+                  <input type="number" step="0.1" defaultValue={conf.min_value ?? ''} id={`min_${conf.ma_cam_bien}`} style={{ width: '80px' }}/>
                   <label>Max:</label>
-                  <input type="number" step="0.1" defaultValue={conf.max_value} id={`max_${conf.ma_rule}`} style={{ width: '70px' }}/>
+                  <input type="number" step="0.1" defaultValue={conf.max_value ?? ''} id={`max_${conf.ma_cam_bien}`} style={{ width: '80px' }}/>
+                  <div style={{ flexBasis: '100%', height: 0 }} />
+                  <label>Thiết bị</label>
+                  <select defaultValue={conf.ma_tb_dieu_khien || ''} id={`actuator_${conf.ma_cam_bien}`} style={{ minWidth: '180px' }}>
+                    <option value="">Chọn thiết bị điều khiển</option>
+                    {(pondConfig.available_actuators || []).map((actuator) => (
+                      <option key={actuator.ma_thiet_bi} value={actuator.ma_thiet_bi}>
+                        {actuator.ma_thiet_bi} ({actuator.loai_thiet_bi})
+                      </option>
+                    ))}
+                  </select>
+                  <label>{'<'} Min:</label>
+                  <select defaultValue={conf.low_action || 'HOAT_DONG'} id={`low_action_${conf.ma_cam_bien}`}>
+                    {RULE_ACTION_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                  <label>{'>'} Max:</label>
+                  <select defaultValue={conf.high_action || 'HOAT_DONG'} id={`high_action_${conf.ma_cam_bien}`}>
+                    {RULE_ACTION_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
                   {hasPermission('pond:update:config') && (
                     <button onClick={() => {
-                        const min = document.getElementById(`min_${conf.ma_rule}`).value;
-                        const max = document.getElementById(`max_${conf.ma_rule}`).value;
-                        handleSaveRule(conf.LoaiCamBien, min, max);
+                        const min = document.getElementById(`min_${conf.ma_cam_bien}`).value;
+                        const max = document.getElementById(`max_${conf.ma_cam_bien}`).value;
+                        const actuatorId = document.getElementById(`actuator_${conf.ma_cam_bien}`).value;
+                        const lowAction = document.getElementById(`low_action_${conf.ma_cam_bien}`).value;
+                        const highAction = document.getElementById(`high_action_${conf.ma_cam_bien}`).value;
+                        handleSaveRule({
+                          ma_rule: conf.ma_rule,
+                          ma_cam_bien: conf.ma_cam_bien,
+                          LoaiCamBien: conf.LoaiCamBien,
+                          ma_tb_dieu_khien: actuatorId,
+                          min_value: min,
+                          max_value: max,
+                          low_action: lowAction,
+                          high_action: highAction
+                        });
                       }} style={{ padding: '6px 12px', cursor: 'pointer' }}>Lưu
                     </button>
                   )}
@@ -776,8 +909,8 @@ const handleDeleteFormula = async (formulaId) => {
 
       <hr style={{ margin: '30px 0', borderColor: '#eee' }} />
 
-      {/* --- PHẦN 3: LỊCH TRÌNH VÀ CÔNG THỨC CHO ĂN --- */}
-      <h3>Cài đặt Lịch trình & Công thức</h3>
+      {/* --- PH蘯ｦN 3: L盻海H TRﾃ君H Vﾃ Cﾃ年G TH盻ｨC CHO ﾄ・ --- */}
+      <h3>Cài đặt lịch trình và công thức</h3>
       <div className="card" style={{ padding: '20px', border: '1px solid #ccc', borderRadius: '8px', marginBottom: '20px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <h4 style={{ margin: 0 }}>Cảnh báo nổi bật ({visibleAlerts.length})</h4>
@@ -837,11 +970,44 @@ const handleDeleteFormula = async (formulaId) => {
           </div>
         )}
       </div>
+      <div className="card" style={{ padding: '20px', border: '1px solid #ccc', borderRadius: '8px', marginBottom: '20px' }}>
+        <h4 style={{ marginTop: 0 }}>Lịch sử cảnh báo của ao</h4>
+        <div style={{ maxHeight: 300, overflow: 'auto', border: '1px solid #e5e7eb', borderRadius: 8 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ background: '#f8fafc', textAlign: 'left' }}>
+                <th style={{ padding: '8px', borderBottom: '1px solid #ddd' }}>STT</th>
+                <th style={{ padding: '8px', borderBottom: '1px solid #ddd' }}>Thời gian</th>
+                <th style={{ padding: '8px', borderBottom: '1px solid #ddd' }}>Tên thiết bị</th>
+                <th style={{ padding: '8px', borderBottom: '1px solid #ddd' }}>Nội dung</th>
+                <th style={{ padding: '8px', borderBottom: '1px solid #ddd' }}>Mức độ</th>
+                <th style={{ padding: '8px', borderBottom: '1px solid #ddd' }}>Tình trạng</th>
+                <th style={{ padding: '8px', borderBottom: '1px solid #ddd' }}>Người phụ trách</th>
+              </tr>
+            </thead>
+            <tbody>
+              {alertHistory.length === 0 ? (
+                <tr><td colSpan="7" style={{ padding: 12, textAlign: 'center' }}>Chưa có lịch sử cảnh báo.</td></tr>
+              ) : alertHistory.map((item, index) => (
+                <tr key={item.history_key}>
+                  <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{index + 1}</td>
+                  <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{new Date(item.thoi_gian_khoi_tao).toLocaleString('vi-VN')}</td>
+                  <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{item.linked_device_id || item.sensor_id}</td>
+                  <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{item.description}</td>
+                  <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{item.severity_label}</td>
+                  <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{item.acknowledged ? 'Đã xử lý' : 'Chưa xử lý'}</td>
+                  <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{item.worker_name || item.displayWorker || 'Hệ thống'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
       <div className="grid-two" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '30px' }}>
         
-        {/* Cột trái: Quản lý Công thức (Chi tiết & Xóa) */}
+        {/* C盻冲 trﾃ｡i: Qu蘯｣n lﾃｽ Cﾃｴng th盻ｩc (Chi ti蘯ｿt & Xﾃｳa) */}
         <div className="card" style={{ padding: '20px', border: '1px solid #ccc', borderRadius: '8px' }}>
-          <h4>Danh sách Công thức & Chi tiết</h4>
+          <h4>Danh sách công thức và chi tiết</h4>
           <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9em' }}>
               <thead>
@@ -876,38 +1042,40 @@ const handleDeleteFormula = async (formulaId) => {
             </table>
           </div>
 
-          {/* Form thêm công thức nhanh */}
+          {/* Form thﾃｪm cﾃｴng th盻ｩc nhanh */}
           <hr style={{ margin: '15px 0', border: '0.5px solid #eee' }} />
           <form onSubmit={handleAddFormula} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <input 
-              placeholder="Mã CT mới" 
+              placeholder="Mã CT mới"
               value={formulaForm.ma_cong_thuc} 
               onChange={e => setFormulaForm({...formulaForm, ma_cong_thuc: e.target.value})} 
               required 
             />
             <div style={{ display: 'flex', gap: '5px' }}>
-              <input 
-                type="number" step="0.1" placeholder="Tỉ lệ" 
-                value={formulaForm.ti_le_cho_an} 
-                onChange={e => setFormulaForm({...formulaForm, ti_le_cho_an: e.target.value})} 
+              <input
+                type="number"
+                step="0.1"
+                placeholder="Ti le"
+                value={formulaForm.ti_le_cho_an}
+                onChange={e => setFormulaForm({ ...formulaForm, ti_le_cho_an: e.target.value })}
                 style={{ flex: 1 }}
               />
-              <input 
-                placeholder="Thông tin bổ sung" 
-                value={formulaForm.thong_tin_bo_sung} 
-                onChange={e => setFormulaForm({...formulaForm, thong_tin_bo_sung: e.target.value})} 
+              <input
+                placeholder="Thong tin bo sung"
+                value={formulaForm.thong_tin_bo_sung}
+                onChange={e => setFormulaForm({ ...formulaForm, thong_tin_bo_sung: e.target.value })}
                 style={{ flex: 2 }}
               />
             </div>
             <button type="submit" style={{ background: '#1890ff', color: 'white', border: 'none', padding: '5px', borderRadius: '4px', cursor: 'pointer' }}>
-              + Thêm Công thức
+              + Thêm công thức
             </button>
           </form>
         </div>
 
-        {/* Cột phải: Thêm Lịch trình (Giữ nguyên hoặc tinh chỉnh) */}
+        {/* C盻冲 ph蘯｣i: Thﾃｪm L盻議h trﾃｬnh (Gi盻ｯ nguyﾃｪn ho蘯ｷc tinh ch盻穎h) */}
         <div className="card" style={{ padding: '20px', border: '1px solid #ccc', borderRadius: '8px' }}>
-          <h4>Tạo Lịch cho Ao (Sử dụng Công thức trên)</h4>
+          <h4>Tạo lịch cho ao (sử dụng công thức trên)</h4>
           <form onSubmit={handleAddSchedule} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <select value={scheduleForm.ma_tb_dieu_khien} onChange={e => setScheduleForm({ ...scheduleForm, ma_tb_dieu_khien: e.target.value })} required style={{ padding: '8px' }}>
               <option value="">Chọn thiết bị điều khiển</option>
@@ -928,7 +1096,7 @@ const handleDeleteFormula = async (formulaId) => {
               <input type="time" value={scheduleForm.end_time} onChange={e => setScheduleForm({ ...scheduleForm, end_time: e.target.value })} required style={{ flex: 1, padding: '8px' }}/>
             </div>
             <button type="submit" style={{ padding: '10px', background: '#4CAF50', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
-              Đặt Lịch Trình
+              Đặt lịch trình
             </button>
             <button
               type="button"
@@ -978,16 +1146,16 @@ const handleDeleteFormula = async (formulaId) => {
         </div>
       </div>
 
-      {/* --- PHẦN 4: LỊCH SỬ CHO ĂN --- */}
+      {/* --- PH蘯ｦN 4: L盻海H S盻ｬ CHO ﾄ・ --- */}
       <div className="card" style={{ padding: '20px', border: '1px solid #ccc', borderRadius: '8px' }}>
-        <h3>Lịch sử nhả thức ăn (Theo trạm)</h3>
+        <h3>Lịch sử nhả thức ăn (theo trạm)</h3>
         <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '10px' }}>
           <thead>
             <tr style={{ background: '#f4f4f4', textAlign: 'left' }}>
               <th style={{ padding: '8px', borderBottom: '1px solid #ddd' }}>Thời gian</th>
               <th style={{ padding: '8px', borderBottom: '1px solid #ddd' }}>Mã thiết bị</th>
               <th style={{ padding: '8px', borderBottom: '1px solid #ddd' }}>Công thức</th>
-              <th style={{ padding: '8px', borderBottom: '1px solid #ddd' }}>Mức độ thèm ăn</th>
+              <th style={{ padding: '8px', borderBottom: '1px solid #ddd' }}>Mức độ thêm ăn</th>
               <th style={{ padding: '8px', borderBottom: '1px solid #ddd' }}>Bằng chứng</th>
             </tr>
           </thead>
@@ -1014,3 +1182,5 @@ const handleDeleteFormula = async (formulaId) => {
 };
 
 export default PondDetailPage;
+
+

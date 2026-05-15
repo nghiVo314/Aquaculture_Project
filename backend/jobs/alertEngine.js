@@ -16,6 +16,30 @@ const ALERT_STATE_TABLE = 'alert_trang_thai';
 const alertStateCache = new Map();
 let cycleRunning = false;
 
+async function ensureRuleActionColumns() {
+    const [columns] = await db.execute(
+        `SELECT COLUMN_NAME
+         FROM INFORMATION_SCHEMA.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME = 'rule_dieu_khien'`
+    );
+    const existingColumns = new Set(columns.map((row) => row.COLUMN_NAME));
+
+    if (!existingColumns.has('low_action')) {
+        await db.execute(
+            `ALTER TABLE rule_dieu_khien
+             ADD COLUMN low_action VARCHAR(20) NULL DEFAULT 'HOAT_DONG' AFTER max_value`
+        );
+    }
+
+    if (!existingColumns.has('high_action')) {
+        await db.execute(
+            `ALTER TABLE rule_dieu_khien
+             ADD COLUMN high_action VARCHAR(20) NULL DEFAULT 'HOAT_DONG' AFTER low_action`
+        );
+    }
+}
+
 async function getAlertState(sensorId, alertKind) {
     await ensureAlertStateTable();
     const key = stateKey(sensorId, alertKind);
@@ -185,14 +209,26 @@ function getMaintenancePersonForSensorType(sensorType) {
     return sensorMap[String(sensorType || '').toUpperCase()] || null;
 }
 
-async function applyAutoControl({ pondId, actuatorId, sensorType, value, max }) {
-    const targetStatus = Number(value) > Number(max) ? 'HOAT_DONG' : 'TAT';
-    await db.execute(
-        `UPDATE thiet_bi_tai_bien SET trang_thai = ? WHERE ma_thiet_bi = ?`,
-        [targetStatus, actuatorId]
+async function applyAutoControl({ pondId, actuatorId, sensorType, value, targetStatus, triggerDirection }) {
+    const normalizedTarget = String(targetStatus || 'HOAT_DONG').toUpperCase() === 'TAT' ? 'TAT' : 'HOAT_DONG';
+    const [[currentDevice]] = await db.execute(
+        `SELECT trang_thai
+         FROM thiet_bi_tai_bien
+         WHERE ma_thiet_bi = ?
+         LIMIT 1`,
+        [actuatorId]
     );
 
-    const controlDescription = `[POND:${pondId}] [ACTUATOR:${actuatorId}] [TYPE:AUTO_CONTROL] Auto set ${sensorType} => ${targetStatus} (value=${value}, max=${max})`;
+    if (String(currentDevice?.trang_thai || '').toUpperCase() === normalizedTarget) {
+        return;
+    }
+
+    await db.execute(
+        `UPDATE thiet_bi_tai_bien SET trang_thai = ? WHERE ma_thiet_bi = ?`,
+        [normalizedTarget, actuatorId]
+    );
+
+    const controlDescription = `[POND:${pondId}] [ACTUATOR:${actuatorId}] [TYPE:AUTO_CONTROL] Auto set ${sensorType} => ${normalizedTarget} on ${triggerDirection} threshold (value=${value})`;
     await db.execute(
         `INSERT INTO log_he_thong (ma_nguoi_dung_tao, log_type, source_type, acknowledged, mo_ta)
          VALUES (NULL, 'AUTO_CONTROL', 'AUTO', 1, ?)`,
@@ -236,7 +272,9 @@ async function activateAlert({
     });
 
     const state = await getAlertState(sensorId, normalizedKind);
-    const shouldCreateLog = !state || Number(state.is_active || 0) !== 1 || state.severity !== severity || state.alert_message !== message;
+    // Dedupe active warnings: once a sensor/kind is active, keep updating state only.
+    // A new history log is created only when the warning appears again after being resolved.
+    const shouldCreateLog = !state || Number(state.is_active || 0) !== 1;
 
     let lastAlertId = state?.last_alert_id ?? null;
     if (shouldCreateLog) {
@@ -291,11 +329,14 @@ async function deactivateAlert(sensorId, alertKind, { value, lastSeenAt } = {}) 
 
 async function checkThresholdWarnings() {
     await ensureAlertStateTable();
+    await ensureRuleActionColumns();
     const [rows] = await db.execute(
         `SELECT
             r.min_value,
             r.max_value,
             r.ma_tb_dieu_khien AS actuator_id,
+            COALESCE(r.low_action, 'HOAT_DONG') AS low_action,
+            COALESCE(r.high_action, 'HOAT_DONG') AS high_action,
             cb.ma_thiet_bi AS sensor_id,
             cb.loai_cam_bien,
             an.ma_ao_nuoi AS pond_id,
@@ -364,13 +405,14 @@ async function checkThresholdWarnings() {
             lastSeenAt: row.latest_time
         });
 
-        if (result.created && String(row.che_do).toUpperCase() === 'AUTO' && row.actuator_id) {
+        if (String(row.che_do).toUpperCase() === 'AUTO' && row.actuator_id) {
             await applyAutoControl({
                 pondId: row.pond_id,
                 actuatorId: row.actuator_id,
                 sensorType: row.loai_cam_bien,
                 value,
-                max
+                targetStatus: isHigh ? row.high_action : row.low_action,
+                triggerDirection: isHigh ? 'high' : 'low'
             });
         }
     }

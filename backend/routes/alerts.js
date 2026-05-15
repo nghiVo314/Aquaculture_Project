@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../services/db');
 const { requireAuth, requirePermission } = require('../middlewares/rbac');
-const { listCurrentAlerts } = require('../services/alerts');
+const { listCurrentAlerts, listAlertHistory } = require('../services/alerts');
 
 router.get('/', requireAuth, async (req, res) => {
     try {
@@ -22,6 +22,32 @@ router.get('/', requireAuth, async (req, res) => {
         res.json(rows);
     } catch (error) {
         console.error('[alerts] list failed:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+router.get('/history', requireAuth, async (req, res) => {
+    try {
+        const pondId = String(req.query.pond_id || '').trim();
+        const sensorId = String(req.query.sensor_id || '').trim();
+        const status = String(req.query.status || 'all').trim().toLowerCase();
+        const sort = String(req.query.sort || 'newest').trim().toLowerCase();
+        const days = Number.parseInt(req.query.days || '', 10);
+        const limit = Number.parseInt(req.query.limit || '200', 10);
+
+        const rows = await listAlertHistory({
+            user: req.user,
+            pondId: pondId || undefined,
+            sensorId: sensorId || undefined,
+            status,
+            sort,
+            days: Number.isFinite(days) && days > 0 ? days : undefined,
+            limit: Number.isFinite(limit) && limit > 0 ? limit : 200
+        });
+
+        res.json(rows);
+    } catch (error) {
+        console.error('[alerts] history failed:', error);
         res.status(500).json({ error: error.message });
     }
 });

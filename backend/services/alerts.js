@@ -288,10 +288,8 @@ async function buildAlertScope(user) {
     };
 }
 
-async function listCurrentAlerts({ user, status, pondId, sort = 'urgent', days } = {}) {
-    await ensureAlertStateTable();
-    const hasPondWorkersTable = await tableExists('ao_nuoi_workers');
-    const workerAssignmentJoin = hasPondWorkersTable
+function buildWorkerAssignmentJoin(hasPondWorkersTable) {
+    return hasPondWorkersTable
         ? `
         LEFT JOIN (
             SELECT ranked.ma_ao_nuoi, ranked.ma_nguoi_dung
@@ -321,6 +319,12 @@ async function listCurrentAlerts({ user, status, pondId, sort = 'urgent', days }
         LEFT JOIN nguoi_dung worker
             ON worker.ma_nguoi_dung = an.ma_nguoi_dung_phu_trach
         `;
+}
+
+async function listCurrentAlerts({ user, status, pondId, sort = 'urgent', days } = {}) {
+    await ensureAlertStateTable();
+    const hasPondWorkersTable = await tableExists('ao_nuoi_workers');
+    const workerAssignmentJoin = buildWorkerAssignmentJoin(hasPondWorkersTable);
 
     const params = [];
     let query = `
@@ -400,6 +404,143 @@ async function listCurrentAlerts({ user, status, pondId, sort = 'urgent', days }
     }));
 }
 
+async function listAlertHistory({
+    user,
+    pondId,
+    sensorId,
+    status = 'all',
+    sort = 'newest',
+    days,
+    limit = 200
+} = {}) {
+    await ensureAlertStateTable();
+
+    const params = [];
+    let query = `
+        SELECT
+            l.ma_log,
+            l.acknowledged,
+            l.mo_ta,
+            l.thoi_gian_khoi_tao,
+            l.ma_nguoi_dung_tao
+        FROM log_he_thong l
+        WHERE l.log_type = 'WARNING'
+    `;
+
+    if (Number.isFinite(days) && days > 0) {
+        query += ' AND l.thoi_gian_khoi_tao >= DATE_SUB(NOW(), INTERVAL ? DAY)';
+        params.push(days);
+    }
+
+    if (status === 'active') {
+        query += ' AND COALESCE(l.acknowledged, 0) = 0';
+    } else if (status === 'resolved') {
+        query += ' AND COALESCE(l.acknowledged, 0) = 1';
+    }
+
+    query += sort === 'oldest'
+        ? ' ORDER BY l.thoi_gian_khoi_tao ASC'
+        : ' ORDER BY l.thoi_gian_khoi_tao DESC';
+
+    if (Number.isFinite(limit) && limit > 0) {
+        query += ' LIMIT ?';
+        params.push(limit);
+    }
+
+    const [rows] = await db.query(query, params);
+    const parsedRows = rows
+        .map((row) => ({ ...row, meta: parseAlertMeta(row.mo_ta) }))
+        .filter((row) => row.meta.sensorId);
+
+    const sensorIds = [...new Set(parsedRows.map((row) => row.meta.sensorId))];
+    if (sensorIds.length === 0) {
+        return [];
+    }
+
+    const placeholders = sensorIds.map(() => '?').join(', ');
+    const hasPondWorkersTable = await tableExists('ao_nuoi_workers');
+    const workerAssignmentJoin = buildWorkerAssignmentJoin(hasPondWorkersTable);
+
+    const [deviceRows] = await db.query(
+        `
+        SELECT
+            cb.ma_thiet_bi AS sensor_id,
+            cb.loai_cam_bien AS sensor_type,
+            tbtb.ma_tram,
+            tbtb.trang_thai AS sensor_status,
+            tb.trang_thai_cloud,
+            an.ma_ao_nuoi,
+            an.ma_khu_vuc,
+            kv.loai_thuy_san,
+            worker.ma_nguoi_dung AS worker_id,
+            worker.ten_dang_nhap AS worker_name,
+            rd.ma_tb_dieu_khien AS linked_device_id,
+            ctrl.loai_thiet_bi AS linked_device_type
+        FROM cam_bien cb
+        JOIN thiet_bi_tai_bien tbtb ON tbtb.ma_thiet_bi = cb.ma_thiet_bi
+        JOIN tram_bien tb ON tb.ma_tram = tbtb.ma_tram
+        JOIN ao_nuoi an ON an.ma_ao_nuoi = tb.ma_ao_nuoi
+        LEFT JOIN khu_vuc kv ON kv.ma_khu_vuc = an.ma_khu_vuc
+        LEFT JOIN rule_dieu_khien rd ON rd.ma_cam_bien = cb.ma_thiet_bi
+        LEFT JOIN thiet_bi_dieu_khien ctrl ON ctrl.ma_thiet_bi = rd.ma_tb_dieu_khien
+        ${workerAssignmentJoin}
+        WHERE cb.ma_thiet_bi IN (${placeholders})
+        `,
+        sensorIds
+    );
+
+    const scope = await buildAlertScope(user);
+    const [allowedRows] = await db.query(
+        `
+        SELECT DISTINCT cb.ma_thiet_bi AS sensor_id
+        FROM cam_bien cb
+        JOIN thiet_bi_tai_bien tbtb ON tbtb.ma_thiet_bi = cb.ma_thiet_bi
+        JOIN tram_bien tb ON tb.ma_tram = tbtb.ma_tram
+        JOIN ao_nuoi an ON an.ma_ao_nuoi = tb.ma_ao_nuoi
+        WHERE cb.ma_thiet_bi IN (${placeholders})
+        ${scope.whereSql}
+        `,
+        [...sensorIds, ...scope.params]
+    );
+    const allowedSensorIds = new Set(allowedRows.map((row) => row.sensor_id));
+    const deviceMap = new Map(deviceRows.map((row) => [row.sensor_id, row]));
+
+    return parsedRows
+        .filter((row) => allowedSensorIds.has(row.meta.sensorId))
+        .filter((row) => !pondId || deviceMap.get(row.meta.sensorId)?.ma_ao_nuoi === pondId)
+        .filter((row) => !sensorId || row.meta.sensorId === sensorId)
+        .map((row) => {
+            const detail = deviceMap.get(row.meta.sensorId) || {};
+            const severity = String(row.meta.severity || 'medium').toLowerCase();
+            return {
+                ma_log: row.ma_log,
+                acknowledged: Number(row.acknowledged) === 1,
+                thoi_gian_khoi_tao: row.thoi_gian_khoi_tao,
+                sensor_id: row.meta.sensorId,
+                sensor_type: detail.sensor_type || row.meta.sensorType,
+                alert_kind: row.meta.alertKind,
+                severity,
+                severity_rank: getSeverityRank(severity),
+                severity_label: getSeverityLabel(severity),
+                description: row.meta.message || row.mo_ta,
+                current_value: row.meta.value,
+                min_value: row.meta.min,
+                max_value: row.meta.max,
+                offline_minutes: row.meta.offlineMinutes,
+                pond_id: detail.ma_ao_nuoi || row.meta.pondId,
+                zone_id: detail.ma_khu_vuc || '',
+                station_id: detail.ma_tram || '',
+                worker_id: detail.worker_id || '',
+                worker_name: detail.worker_name || '',
+                linked_device_id: detail.linked_device_id || '',
+                linked_device_type: detail.linked_device_type || '',
+                trang_thai_cloud: detail.trang_thai_cloud || '',
+                sensor_status: detail.sensor_status || '',
+                history_key: `${row.meta.sensorId}:${row.ma_log}`
+            };
+        });
+}
+
 module.exports = {
     ALERT_STATE_TABLE,
     SEVERITY_RANK,
@@ -414,5 +555,8 @@ module.exports = {
     buildAlertDescription,
     parseAlertMeta,
     ensureAlertStateTable,
-    listCurrentAlerts
+    tableExists,
+    buildAlertScope,
+    listCurrentAlerts,
+    listAlertHistory
 };

@@ -22,6 +22,7 @@ const MainLayout = () => {
     { label: 'Dashboard', path: '/' },
     // { label: 'Điều khiển', path: '/control' },
     // { label: 'Lịch trình', path: '/schedules' },
+    ...(isManagerOrAdmin ? [{ label: 'Thiết bị', path: '/management' }] : []),
     { label: 'Báo cáo', path: '/reports' },
     { label: 'Cảnh báo', path: '/alerts' },
     { label: 'Nhật ký', path: '/logs' },
@@ -56,20 +57,6 @@ const MainLayout = () => {
               {item.label}
             </Link>
           ))}
-
-          {/* {isManagerOrAdmin && (
-            <Link
-              to="/management"
-              style={{
-                ...styles.link,
-                ...(location.pathname === '/management'
-                  ? styles.activeOrange
-                  : styles.orange),
-              }}
-            >
-              Quản lý Trại
-            </Link>
-          )} */}
 
           {isAdmin && (
             <Link

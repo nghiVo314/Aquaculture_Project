@@ -5,7 +5,7 @@ import { BrowserRouter as Router, Navigate, Route, Routes } from 'react-router-d
 import DashboardPage from './pages/DashboardPage';
 import LoginPage from './pages/LoginPage';
 import LogsPage from './pages/LogsPage';
-// import ManagementPage from './pages/ManagementPage';
+import ManagementPage from './pages/ManagementPage';
 import RegisterPage from './pages/RegisterPage';
 // import ControlPanelPage from './pages/ControlPanelPage';
 import AlertsPage from './pages/AlertsPageNew';
@@ -77,14 +77,14 @@ const AppRoutes = () => {
         <Route path="ao-nuoi/:id" element={<PondDetailPage />} />
         
         {/* Trang Quản lý Không gian & Thiết bị: Chỉ Admin và Manager mới vào được */}
-        {/* <Route
+        <Route
           path="management"
           element={
             <RoleRoute allow={['admin', 'manager']}>
               <ManagementPage />
             </RoleRoute>
           }
-        /> */}
+        />
 
         {/* Trang Quản lý User: CHỈ DÀNH CHO ADMIN */}
         <Route

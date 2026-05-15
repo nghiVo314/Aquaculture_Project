@@ -1,25 +1,48 @@
 import React, { useEffect, useState } from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer
+} from 'recharts';
 import { getSensorHistory } from '../services/api';
 
 const SensorChart = ({ deviceId, label }) => {
   const [data, setData] = useState([]);
 
   useEffect(() => {
-    // Đảm bảo không fetch nếu chưa có deviceId
-    if (!deviceId) return;
+    if (!deviceId) {
+      setData([]);
+      return undefined;
+    }
 
-    getSensorHistory(deviceId)
-      .then(json => {
-        // Đảm bảo dữ liệu là mảng trước khi set state
-        if (Array.isArray(json)) {
-          setData(json);
+    let cancelled = false;
+
+    const loadHistory = async () => {
+      try {
+        const rows = await getSensorHistory(deviceId);
+        if (!cancelled) {
+          setData(Array.isArray(rows) ? rows : []);
         }
-      })
-      .catch(err => console.error("Lỗi khi tải dữ liệu biểu đồ:", err));
+      } catch (error) {
+        if (!cancelled) {
+          console.error('Lỗi khi tải dữ liệu biểu đồ:', error);
+        }
+      }
+    };
+
+    loadHistory();
+    const intervalId = setInterval(loadHistory, 5000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(intervalId);
+    };
   }, [deviceId]);
 
-  // Hàm format thời gian cho trục X (Ví dụ: "09:40" hoặc "15/04 09:40")
   const formatXAxis = (tickItem) => {
     if (!tickItem) return '';
     const date = new Date(tickItem);
@@ -32,22 +55,20 @@ const SensorChart = ({ deviceId, label }) => {
       <ResponsiveContainer width="100%" height="90%">
         <LineChart data={data} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" />
-          <XAxis 
-            dataKey="thoi_gian" 
-            tick={{ fontSize: 12 }} 
-            tickFormatter={formatXAxis} // Rút gọn thời gian hiển thị
+          <XAxis
+            dataKey="thoi_gian"
+            tick={{ fontSize: 12 }}
+            tickFormatter={formatXAxis}
           />
           <YAxis tick={{ fontSize: 12 }} />
-          <Tooltip 
-            labelFormatter={(label) => new Date(label).toLocaleString()} // Tooltip hiển thị đầy đủ ngày giờ
-          />
-          <Line 
-            type="monotone" 
-            dataKey="gia_tri" 
-            stroke="#8884d8" 
+          <Tooltip labelFormatter={(chartLabel) => new Date(chartLabel).toLocaleString('vi-VN')} />
+          <Line
+            type="monotone"
+            dataKey="gia_tri"
+            stroke="#8884d8"
             strokeWidth={2}
-            dot={false} 
-            activeDot={{ r: 6 }} 
+            dot={false}
+            activeDot={{ r: 6 }}
           />
         </LineChart>
       </ResponsiveContainer>

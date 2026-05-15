@@ -4,6 +4,7 @@ import random
 import time
 import datetime
 import sys
+import os
 from adafruit_service import (
     init_adafruit,
     publish_sensor_pond1,
@@ -16,6 +17,8 @@ from adafruit_service import (
 # ==========================================
 # Biến toàn cục lưu trữ dữ liệu và cấu hình cho từng ao
 ponds_data = {}
+ENABLE_SENSOR_SIMULATION = str(os.getenv("GATEWAY_SIMULATE_SENSORS", "")).strip().lower() in {"1", "true", "yes", "on"}
+last_no_sensor_warning_at = None
 #láy config của các ao từ database
 def init_ponds_data_from_server():
     global ponds_data
@@ -216,13 +219,14 @@ def control_device(pond_key, device_name, action):
 
 # Logic điều khiển bật tắt thiết bị dựa trên ngưỡng cảm biến và chế độ AUTO/MANUAL
 def processData(pond_key, sensor_type, value):
+    sensor_type = str(sensor_type).upper()
     if pond_key not in ponds_data:
         print(f"⚠️ Không tìm thấy cấu hình cho Ao ID: {pond_key}")
         return
     #publish to adafruit
-    if(str(sensor_type).upper() == "TEMP" and str(pond_key) == "TRAM_AO_01"):
+    if(sensor_type == "TEMP" and str(pond_key) == "TRAM_AO_01"):
         publish_sensor_pond1(sensor_type, value)
-    elif(str(sensor_type).upper() == "LIGHT" and str(pond_key) == "TRAM_AO_01"):
+    elif(sensor_type == "LIGHT" and str(pond_key) == "TRAM_AO_01"):
         publish_sensor_pond1(sensor_type, value)
 
     # Lấy cấu hình và sensor_ids tương ứng với ao hiện tại
@@ -255,7 +259,10 @@ def processData(pond_key, sensor_type, value):
 
     # Gửi dữ liệu về backend    
     try:
-        device_id = sensor_ids.get(sensor_type, "CB_UNKNOWN")
+        device_id = sensor_ids.get(sensor_type)
+        if not device_id:
+            print(f"Khong tim thay sensor_id cho {sensor_type} tai ao {pond_key}. Bo qua ghi du lieu.")
+            return
         res = requests.post("http://localhost:5000/api/sensors", json={
             "device_id": device_id, 
             "value": value
@@ -387,6 +394,18 @@ def fakeSerial():
             processData(pond_key, "LIGHT", fake_light)
 
 # Hàm kiểm tra tín hiệu reload từ server để cập nhật lại cấu trúc ao nếu có thay đổi
+def warn_no_sensor_input():
+    global last_no_sensor_warning_at
+    now = datetime.datetime.now()
+
+    if last_no_sensor_warning_at is None or (now - last_no_sensor_warning_at).total_seconds() >= 60:
+        print(
+            f"[{now.strftime('%H:%M:%S')}] KHONG co du lieu cam bien that: "
+            "gateway khong ket noi duoc microbit/serial va che do mo phong dang tat. "
+            "Khong gui du lieu gia len backend."
+        )
+        last_no_sensor_warning_at = now
+
 def check_reload_signal():
     global ponds_data
     try:
@@ -430,8 +449,10 @@ while True:
     # 2. Đọc dữ liệu thực tế từ mạch và tạo dữ liệu giả
     if isMicrobitConnected:
         readSerial()
-    else:
+    elif ENABLE_SENSOR_SIMULATION:
         fakeSerial() 
+    else:
+        warn_no_sensor_input()
 
     # 3. Kiểm tra lịch cho ăn
     check_feeder_schedule()

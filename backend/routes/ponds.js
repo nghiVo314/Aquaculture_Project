@@ -59,6 +59,8 @@ async function ensureThresholdHistoryTable(connection = db) {
         ['loai_cam_bien', 'VARCHAR(50) NULL DEFAULT NULL'],
         ['ma_cam_bien', 'VARCHAR(50) NULL DEFAULT NULL'],
         ['ma_tb_dieu_khien', 'VARCHAR(50) NULL DEFAULT NULL'],
+        ['low_action', 'VARCHAR(20) NULL DEFAULT NULL'],
+        ['high_action', 'VARCHAR(20) NULL DEFAULT NULL'],
         ['vi_tri_thiet_bi', 'VARCHAR(100) NULL DEFAULT NULL'],
         ['mo_ta', 'VARCHAR(255) NULL DEFAULT NULL'],
         ['nguoi_sua', 'VARCHAR(100) NULL DEFAULT NULL'],
@@ -72,6 +74,30 @@ async function ensureThresholdHistoryTable(connection = db) {
         if (!existingColumns.has(columnName)) {
             await connection.execute(`ALTER TABLE lich_su_chinh_nguong ADD COLUMN ${columnName} ${definition}`);
         }
+    }
+}
+
+async function ensureRuleActionColumns(connection = db) {
+    const [columns] = await connection.execute(
+        `SELECT COLUMN_NAME
+         FROM INFORMATION_SCHEMA.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME = 'rule_dieu_khien'`
+    );
+    const existingColumns = new Set(columns.map((row) => row.COLUMN_NAME));
+
+    if (!existingColumns.has('low_action')) {
+        await connection.execute(
+            `ALTER TABLE rule_dieu_khien
+             ADD COLUMN low_action VARCHAR(20) NULL DEFAULT 'HOAT_DONG' AFTER max_value`
+        );
+    }
+
+    if (!existingColumns.has('high_action')) {
+        await connection.execute(
+            `ALTER TABLE rule_dieu_khien
+             ADD COLUMN high_action VARCHAR(20) NULL DEFAULT 'HOAT_DONG' AFTER low_action`
+        );
     }
 }
 
@@ -240,6 +266,7 @@ router.post('/', requireAuth, requirePermission('pond:create'), async (req, res)
 router.get('/:ao_id/config', async (req, res) => {
     try {
         await ensurePondWorkerColumn(db);
+        await ensureRuleActionColumns(db);
 
         const [[pond]] = await db.execute(
             `SELECT che_do
@@ -255,23 +282,43 @@ router.get('/:ao_id/config', async (req, res) => {
                 r.max_value, 
                 r.ma_rule, 
                 cb.ma_thiet_bi AS ma_cam_bien,
+                r.ma_tb_dieu_khien,
+                COALESCE(r.low_action, 'HOAT_DONG') AS low_action,
+                COALESCE(r.high_action, 'HOAT_DONG') AS high_action,
+                dk.loai_thiet_bi AS loai_thiet_bi_dieu_khien,
                 (SELECT gia_tri
                  FROM du_lieu_quan_trac
                  WHERE ma_cam_bien = cb.ma_thiet_bi
                  ORDER BY thoi_gian DESC
                  LIMIT 1) AS latest_value
-             FROM rule_dieu_khien r
-             JOIN cam_bien cb ON r.ma_cam_bien = cb.ma_thiet_bi
+             FROM cam_bien cb
+             LEFT JOIN rule_dieu_khien r ON r.ma_cam_bien = cb.ma_thiet_bi
+             LEFT JOIN thiet_bi_dieu_khien dk ON dk.ma_thiet_bi = r.ma_tb_dieu_khien
              JOIN thiet_bi_tai_bien tbtb ON cb.ma_thiet_bi = tbtb.ma_thiet_bi
              JOIN tram_bien tb ON tbtb.ma_tram = tb.ma_tram
-             WHERE tb.ma_ao_nuoi = ?`,
+             WHERE tb.ma_ao_nuoi = ?
+             ORDER BY cb.loai_cam_bien, cb.ma_thiet_bi`,
+            [req.params.ao_id]
+        );
+
+        const [availableActuators] = await db.execute(
+            `SELECT
+                dk.ma_thiet_bi,
+                dk.loai_thiet_bi,
+                tbtb.trang_thai
+             FROM thiet_bi_dieu_khien dk
+             JOIN thiet_bi_tai_bien tbtb ON tbtb.ma_thiet_bi = dk.ma_thiet_bi
+             JOIN tram_bien tb ON tb.ma_tram = tbtb.ma_tram
+             WHERE tb.ma_ao_nuoi = ?
+             ORDER BY dk.loai_thiet_bi, dk.ma_thiet_bi`,
             [req.params.ao_id]
         );
 
         res.json({
             ao_id: req.params.ao_id,
             che_do: pond?.che_do || 'AUTO',
-            configs
+            configs,
+            available_actuators: availableActuators
         });
 
     } catch (error) {
@@ -280,7 +327,7 @@ router.get('/:ao_id/config', async (req, res) => {
 });
 
 // SỬA CẤU HÌNH AO - Chỉ dành cho user có quyền 'pond:update:config'
-router.put('/:ao_id/config', requireAuth, requirePermission('pond:update:config'), async (req, res) => {
+router.put('/legacy/:ao_id/config', requireAuth, requirePermission('pond:update:config'), async (req, res) => {
     const { LoaiCamBien, min_value, max_value } = req.body;
     const connection = await db.getConnection();
     try {
@@ -363,6 +410,159 @@ router.put('/:ao_id/config', requireAuth, requirePermission('pond:update:config'
 });
 
 // Lấy lịch sử chỉnh ngưỡng của ao
+router.put('/:ao_id/config', requireAuth, requirePermission('pond:update:config'), async (req, res) => {
+    const { ma_rule, ma_cam_bien, ma_tb_dieu_khien, LoaiCamBien, min_value, max_value, low_action, high_action } = req.body;
+    const connection = await db.getConnection();
+    try {
+        await ensureThresholdHistoryTable(connection);
+        await ensureRuleActionColumns(connection);
+        const ownershipCheck = await checkPondOwnership(connection, req.params.ao_id, req.user.id);
+        if (!ownershipCheck.authorized) {
+            return res.status(403).json({
+                status: 'error',
+                message: ownershipCheck.errorMessage
+            });
+        }
+
+        const normalizedLowAction = String(low_action || 'HOAT_DONG').trim().toUpperCase();
+        const normalizedHighAction = String(high_action || 'HOAT_DONG').trim().toUpperCase();
+        const validActions = new Set(['HOAT_DONG', 'TAT']);
+        if (!validActions.has(normalizedLowAction) || !validActions.has(normalizedHighAction)) {
+            return res.status(400).json({ status: 'error', message: 'Hanh dong rule chi duoc la HOAT_DONG hoac TAT' });
+        }
+
+        const parsedMin = Number(min_value);
+        const parsedMax = Number(max_value);
+        if (!Number.isFinite(parsedMin) || !Number.isFinite(parsedMax) || parsedMin >= parsedMax) {
+            return res.status(400).json({ status: 'error', message: 'Nguong min/max khong hop le' });
+        }
+
+        if (!ma_tb_dieu_khien) {
+            return res.status(400).json({ status: 'error', message: 'Thieu thiet bi dieu khien cho rule' });
+        }
+
+        await connection.beginTransaction();
+
+        const [sensorRows] = await connection.execute(
+            `SELECT
+                cb.ma_thiet_bi AS ma_cam_bien,
+                cb.loai_cam_bien,
+                tb.ma_tram
+             FROM cam_bien cb
+             JOIN thiet_bi_tai_bien tbtb ON tbtb.ma_thiet_bi = cb.ma_thiet_bi
+             JOIN tram_bien tb ON tb.ma_tram = tbtb.ma_tram
+             WHERE tb.ma_ao_nuoi = ?
+               AND (? IS NULL OR cb.ma_thiet_bi = ?)
+               AND (? IS NULL OR cb.loai_cam_bien = ?)
+             ORDER BY cb.ma_thiet_bi
+             LIMIT 1`,
+            [req.params.ao_id, ma_cam_bien || null, ma_cam_bien || null, LoaiCamBien || null, LoaiCamBien || null]
+        );
+
+        if (sensorRows.length === 0) {
+            await connection.rollback();
+            return res.status(404).json({ status: 'error', message: 'Khong tim thay cam bien trong ao de cau hinh rule' });
+        }
+
+        const sensor = sensorRows[0];
+
+        const [[actuator]] = await connection.execute(
+            `SELECT
+                dk.ma_thiet_bi,
+                dk.loai_thiet_bi
+             FROM thiet_bi_dieu_khien dk
+             JOIN thiet_bi_tai_bien tbtb ON tbtb.ma_thiet_bi = dk.ma_thiet_bi
+             JOIN tram_bien tb ON tb.ma_tram = tbtb.ma_tram
+             WHERE tb.ma_ao_nuoi = ? AND dk.ma_thiet_bi = ?
+             LIMIT 1`,
+            [req.params.ao_id, ma_tb_dieu_khien]
+        );
+
+        if (!actuator) {
+            await connection.rollback();
+            return res.status(404).json({ status: 'error', message: 'Thiet bi dieu khien khong thuoc ao nay hoac khong ton tai' });
+        }
+
+        const [matchedRules] = await connection.execute(
+            `SELECT
+                r.ma_rule,
+                cb.loai_cam_bien,
+                cb.ma_thiet_bi AS ma_cam_bien,
+                r.min_value,
+                r.max_value,
+                COALESCE(r.low_action, 'HOAT_DONG') AS low_action,
+                COALESCE(r.high_action, 'HOAT_DONG') AS high_action,
+                r.ma_tb_dieu_khien,
+                tb.ma_tram
+             FROM rule_dieu_khien r
+             JOIN cam_bien cb ON r.ma_cam_bien = cb.ma_thiet_bi
+             JOIN thiet_bi_tai_bien tbtb ON cb.ma_thiet_bi = tbtb.ma_thiet_bi
+             JOIN tram_bien tb ON tbtb.ma_tram = tb.ma_tram
+             WHERE tb.ma_ao_nuoi = ?
+               AND cb.ma_thiet_bi = ?
+               AND (? IS NULL OR r.ma_rule = ?)
+             LIMIT 1`,
+            [req.params.ao_id, sensor.ma_cam_bien, ma_rule || null, ma_rule || null]
+        );
+
+        const rule = matchedRules[0] || null;
+        const actorName = req.user?.username || req.user?.TenDangNhap || req.user?.id || 'system';
+        const deviceLocation = sensor.ma_tram || 'unknown';
+        const finalRuleId = rule?.ma_rule || `RULE_${sensor.ma_cam_bien}`;
+        const previousRangeText = rule
+            ? `${Number(rule.min_value || 0)}-${Number(rule.max_value || 0)}`
+            : 'chua cau hinh';
+        const previousActionText = rule
+            ? `< min => ${rule.low_action}, > max => ${rule.high_action}, thiet bi => ${rule.ma_tb_dieu_khien}`
+            : 'chua cau hinh';
+        const description = `${sensor.loai_cam_bien} doi nguong tu ${previousRangeText} sang ${parsedMin}-${parsedMax}; ${previousActionText}; moi: < min => ${normalizedLowAction}, > max => ${normalizedHighAction}, thiet bi => ${actuator.ma_thiet_bi}`;
+
+        if (rule) {
+            await connection.execute(
+                `UPDATE rule_dieu_khien
+                 SET ma_tb_dieu_khien = ?, min_value = ?, max_value = ?, low_action = ?, high_action = ?
+                 WHERE ma_rule = ?`,
+                [actuator.ma_thiet_bi, parsedMin, parsedMax, normalizedLowAction, normalizedHighAction, rule.ma_rule]
+            );
+        } else {
+            await connection.execute(
+                `INSERT INTO rule_dieu_khien
+                    (ma_rule, ma_cam_bien, ma_tb_dieu_khien, min_value, max_value, low_action, high_action)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                [finalRuleId, sensor.ma_cam_bien, actuator.ma_thiet_bi, parsedMin, parsedMax, normalizedLowAction, normalizedHighAction]
+            );
+        }
+
+        await connection.execute(
+            `INSERT INTO lich_su_chinh_nguong
+                (ma_ao_nuoi, ma_rule, loai_cam_bien, ma_cam_bien, ma_tb_dieu_khien, low_action, high_action, vi_tri_thiet_bi, mo_ta, nguoi_sua, da_sua, min_value, max_value)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+            [
+                req.params.ao_id,
+                finalRuleId,
+                sensor.loai_cam_bien,
+                sensor.ma_cam_bien,
+                actuator.ma_thiet_bi,
+                normalizedLowAction,
+                normalizedHighAction,
+                deviceLocation,
+                description,
+                actorName,
+                parsedMin,
+                parsedMax
+            ]
+        );
+
+        await connection.commit();
+        res.json({ status: 'updated', ma_rule: finalRuleId });
+    } catch (error) {
+        try { await connection.rollback(); } catch (_) {}
+        res.status(500).json({ error: error.message });
+    } finally {
+        connection.release();
+    }
+});
+
 router.get('/:ao_id/config/history', requireAuth, async (req, res) => {
     const connection = await db.getConnection();
     try {
@@ -376,6 +576,8 @@ router.get('/:ao_id/config/history', requireAuth, async (req, res) => {
                 loai_cam_bien,
                 ma_cam_bien,
                 ma_tb_dieu_khien,
+                low_action,
+                high_action,
                 vi_tri_thiet_bi,
                 mo_ta,
                 nguoi_sua,
